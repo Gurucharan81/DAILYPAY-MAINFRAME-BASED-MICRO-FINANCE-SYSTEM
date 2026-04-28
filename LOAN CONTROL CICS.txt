@@ -1,0 +1,102 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CONTROLL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY DFHAID.
+       COPY CONT.
+       01 WS-AID              PIC X.
+       01 WS-MSG              PIC X(60).
+       01 WS-RESP             PIC S9(8) COMP.
+       01 WS-TIME             PIC S9(7) COMP-3.
+       01 WS-SNO-FLD          PIC 99.
+       01 WS-COMMAREA         PIC X(100).
+       01 WS-CONTROL-REC.
+          05 WS-SNO             PIC XX.
+          05 WS-MINAGE-X        PIC 9(3).
+          05 WS-MAXAGE-X        PIC 9(3).
+          05 WS-MINAMT-X        PIC 9(5).
+          05 WS-MAXAMT-X        PIC 9(6).
+          05 WS-MINTEN-X        PIC 9(2).
+          05 WS-MAXTEN-X        PIC 9(3).
+          05 WS-MAXLOAN-X       PIC 9.
+          05 WS-INTRATE-X       PIC 9(2).
+          05 WS-GRACE-X         PIC 9.
+          05 WS-REAPP-X         PIC 9(3).
+          05 WS-APPSCR-X        PIC 9(2).
+          05 FILLER             PIC X(17).
+       LINKAGE SECTION.
+       01 DFHCOMMAREA PIC X(100).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE EIBAID TO WS-AID
+           MOVE DFHCOMMAREA   TO WS-COMMAREA
+           IF EIBCALEN = 0
+               PERFORM INITIAL-SCREEN
+           ELSE
+               PERFORM RECEIVE-SCREEN
+               PERFORM PROCESS-AID
+           END-IF
+              EXEC CICS RETURN
+                TRANSID('CUNT')
+                COMMAREA(WS-COMMAREA)
+              END-EXEC.
+       INITIAL-SCREEN.
+           MOVE LOW-VALUES TO CONTO
+           MOVE 'ENTER LOAN PARAMETERS' TO MSGFLDO
+           PERFORM SEND-SCREEN.
+       RECEIVE-SCREEN.
+           EXEC CICS RECEIVE
+                MAP('CONT')
+                MAPSET('CONT')
+                INTO(CONTI)
+           END-EXEC
+           MOVE '01'     TO WS-SNO
+           MOVE MINAGEI  TO WS-MINAGE-X
+           MOVE MAXAGEI  TO WS-MAXAGE-X
+           MOVE MINAMTI  TO WS-MINAMT-X
+           MOVE MAXAMTI  TO WS-MAXAMT-X
+           MOVE MINTENI  TO WS-MINTEN-X
+           MOVE MAXTENI  TO WS-MAXTEN-X
+           MOVE MAXLOANI TO WS-MAXLOAN-X
+           MOVE INTRATEI TO WS-INTRATE-X
+           MOVE GRACEI   TO WS-GRACE-X
+           MOVE REAPPI   TO WS-REAPP-X
+           MOVE APPSCRI  TO WS-APPSCR-X.
+       PROCESS-AID.
+           EVALUATE WS-AID
+               WHEN DFHENTER
+                   PERFORM WRITE-RECORD
+               WHEN DFHPF3
+                   EXEC CICS RETURN END-EXEC
+               WHEN DFHPF5
+                   PERFORM INITIAL-SCREEN
+               WHEN DFHPF12
+                   MOVE LOW-VALUES TO CONTO
+                   MOVE 'CANCELLED' TO WS-MSG
+                   PERFORM SEND-SCREEN
+               WHEN OTHER
+                   MOVE 'INVALID KEY' TO WS-MSG
+                   PERFORM SEND-SCREEN
+           END-EVALUATE.
+       WRITE-RECORD.
+           EXEC CICS WRITE
+                FILE('PRFL')
+                FROM(WS-CONTROL-REC)
+                RIDFLD(WS-SNO)
+                RESP(WS-RESP)
+           END-EXEC.
+           IF WS-RESP = DFHRESP(NORMAL)
+               MOVE 'DATA WRITTEN SUCCESSFULLY' TO WS-MSG
+               PERFORM SEND-SCREEN
+           END-IF.
+
+       SEND-SCREEN.
+           MOVE WS-MSG TO MSGFLDO
+           EXEC CICS SEND
+                MAP('CONT')
+                MAPSET('CONT')
+                FROM(CONTO)
+                FREEKB
+                ERASE
+           END-EXEC.
+
