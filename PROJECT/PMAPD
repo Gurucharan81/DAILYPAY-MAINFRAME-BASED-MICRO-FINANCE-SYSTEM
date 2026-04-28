@@ -1,0 +1,340 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PMAPD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-RESP            PIC S9(8) COMP.
+       01 WS-CUST-ID         PIC 9(5).
+       01 WS-LOAN-ID         PIC 9(6).
+       01 WS-MIN-AGE         PIC 9(3).
+       01 WS-MAX-AGE         PIC 9(3).
+       01 WS-CONTROL-REC.
+          05 WS-SNO-FLD   pic 99 VALUE 01.
+          05 WS-MINAGE-X        PIC 9(3).
+          05 WS-MAXAGE-X        PIC 9(3).
+          05 WS-MINAMT-X        PIC 9(5).
+          05 WS-MAXAMT-X        PIC 9(6).
+          05 WS-MINTEN-X        PIC 9(2).
+          05 WS-MAXTEN-X        PIC 9(3).
+          05 WS-MAXLOAN-X       PIC 9.
+          05 WS-INTRATE-X       PIC 9(2).
+          05 WS-GRACE-X         PIC 9.
+          05 WS-REAPP-X         PIC 9(3).
+          05 WS-APPSCR-X        PIC 9(3).
+          05 REST               PIC X(6) VALUE SPACES.
+       01 WS-AADH-REC.
+          05 AADH-NO      PIC X(12).
+          05 FILLER       PIC X.
+          05 NAME         PIC X(20).
+          05 FILLER       PIC X.
+          05 DOB          PIC X(10).
+          05 FILLER       PIC X.
+          05 AGE          PIC 9(3).
+          05 FILLER       PIC X.
+          05 MOBILE       PIC X(10).
+          05 FILLER       PIC X.
+          05 ADDRESS1     PIC X(23).
+          05 FILLER       PIC X.
+          05 GENDER       PIC X(6).
+          05 FILLER       PIC X.
+          05 EXIST-LOAN   PIC X(1).
+          05 FILLER       PIC X.
+          05 CUST-ID      PIC 9(5).
+          05 FILLER       PIC X(2) VALUE  SPACES.
+       01 WS-CUST-REC.
+          05 CUST-ID1       PIC 9(5).
+          05 CUST-AADH      PIC X(12).
+          05 CUST-NAME      PIC X(20).
+          05 CUST-DOB       PIC X(10).
+          05 AGE2           pic 9(3).
+          05 GENDER2        pic x(6).
+          05 MOBILE2        PIC X(10).
+          05 ADDRESS12      PIC X(23).
+          05 OCCUPATION     PIC X(20).
+          05 INCOME         PIC 9(6).
+          05 NOM-NAME       PIC X(20).
+          05 NOM-REL        PIC X(10).
+          05 NOM-MOB        PIC 9(10).
+          05 NOM-AADH       PIC X(12).
+          05 WS-LOAN-SEQ        PIC 9(1).
+          05 LOANS OCCURS 5 TIMES.
+             10 LOAN-ID     PIC 9(6).
+          05 FILLER        PIC X(2) VALUE SPACES.
+       01 LOAN1-ID      PIC 9(6).
+       01 WS-SEQ-REC.
+          05 SEQ-KEY        PIC 9(5).
+          05 REST           PIC X(5) VALUE SPACES.
+          05 LAST-CUST-ID1  PIC 9(5).
+          05 REST1          PIC X(5) VALUE SPACES.
+       01 LOAN-COM.
+          05 LOAN-SCREEN   PIC X.
+          05 LOAN-INCOME   PIC 9(6).
+          05 LOAN-NAME     PIC X(20).
+          05 LOAN-CUST-ID  PIC 9(5).
+          05 LOAN-LOAN-ID  PIC 9(6).
+       01 LOAN-SEQ PIC 9(1).
+       COPY CMPD.
+       COPY DFHAID.
+       01 WS-COMMAREA PIC X.
+       LINKAGE SECTION.
+       01 DFHCOMMAREA.
+          05 CA-FLAG        PIC X(1).
+          05 CA-AADHAAR     PIC X(12).
+          05 CA-CUST-ID1    PIC 9(5).
+          05 CA-MESSAGE     PIC X(50).
+          05 CA-STATUS      PIC X(10).
+          05 CA-INCOME      pic 9(6).
+          05 CA-EXIST       PIC X.
+          05 CA-LOAN       PIC 9(6).
+          05 P    PIC X.
+          05 REST           PIC X(115) VALUE SPACES.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+             IF EIBCALEN = 0
+      *      MOVE 'I' TO CA-FLAG
+             PERFORM SEND-SCREEN
+             ELSE
+      *      MOVE DFHCOMMAREA TO WS-COMMAREA
+             PERFORM RECEIVE-SCREEN
+             EXEC CICS SEND TEXT FROM(CA-FLAG) LENGTH(1) END-EXEC
+             IF CA-FLAG NOT = 'I'
+             PERFORM PROCESS-LOGIC
+             ELSE
+             PERFORM SOLLU-PARA
+             END-IF
+             PERFORM SEND-SCREEN
+             END-IF
+             MOVE WS-COMMAREA TO DFHCOMMAREA.
+       SEND-SCREEN.
+             MOVE LOW-VALUES TO CMPDO
+             EXEC CICS SEND MAP('CMPD')
+             MAPSET('CMPD')
+             FROM(CMPDO)   ERASE
+             END-EXEC.
+             EXEC CICS RETURN
+             TRANSID('TMPD')
+             COMMAREA(WS-COMMAREA)
+             LENGTH(LENGTH OF WS-COMMAREA)
+             END-EXEC.
+         RECEIVE-SCREEN.
+             EXEC CICS RECEIVE MAP('CMPD')
+             MAPSET('CMPD')
+             END-EXEC.
+
+         PROCESS-LOGIC.
+             MOVE AADHAAI TO CA-AADHAAR
+            MOVE 'I' TO CA-FLAG
+             PERFORM FETCH-AADHAAR
+             PERFORM READ-PARAM
+             PERFORM VALIDATE-AGE
+             PERFORM VALIDATE-INPUT.
+        SOLLU-PARA.
+             MOVE 'I' TO P
+             PERFORM CHECK-CUSTOMER.
+         FETCH-AADHAAR.
+             EXEC CICS READ
+             FILE('AADHFILE')
+             INTO(WS-AADH-REC)
+             RIDFLD(CA-AADHAAR)
+             RESP(WS-RESP)
+             END-EXEC
+             IF WS-RESP = DFHRESP(NORMAL)
+                MOVE NAME    TO NAME1O
+                MOVE DOB     TO DOBO
+                MOVE AGE     TO AGEO
+                MOVE MOBILE  TO MOBILEO
+                MOVE ADDRESS1 TO ADDRE1O
+                MOVE GENDER  TO GENDERO
+                MOVE EXIST-LOAN TO CA-EXIST
+                move CUST-ID  to CA-CUST-ID1
+             ELSE
+                MOVE 'AADHAAR NOT FOUND' TO MESSAGO
+             END-IF.
+        READ-PARAM.
+                EXEC CICS READ
+                 FILE('PARMFILE')
+                 INTO(WS-CONTROL-REC)
+                 RIDFLD(WS-SNO-FLD)
+                 RESP(WS-RESP)
+                 END-EXEC
+             MOVE WS-MINAGE-X TO WS-MIN-AGE
+             MOVE WS-MAXAGE-X TO WS-MAX-AGE.
+        VALIDATE-AGE.
+             IF AGEO < WS-MIN-AGE
+                MOVE 'AGE BELOW LIMIT' TO MESSAGO
+             ELSE
+               IF AGEO > WS-MAX-AGE
+                MOVE 'AGE ABOVE LIMIT' TO MESSAGO
+             END-IF
+             END-IF.
+             EXEC CICS SEND MAP('CMPD')
+             MAPSET('CMPD')
+             FROM(CMPDO)
+             END-EXEC.
+             EXEC CICS RETURN
+             TRANSID('TMPD')
+             COMMAREA(DFHCOMMAREA)
+             LENGTH(LENGTH OF DFHCOMMAREA)
+             END-EXEC.
+        VALIDATE-INPUT.
+             IF OCCUPAI = SPACES OR MONTHII = SPACES
+             MOVE 'ENTER OCCUPATION & INCOME' TO MESSAGO
+             END-IF.
+        CHECK-CUSTOMER.
+             IF CA-EXIST = 'Y'
+               MOVE CA-CUST-ID1  TO CUST-ID1
+               MOVE CA-CUST-ID1 TO WS-CUST-ID
+               MOVE WS-LOAN-SEQ TO LOAN-SEQ
+      *        MOVE LOAN-ID TO LOAN1-ID
+             EXEC CICS READ
+             FILE('CUSTFL')
+             INTO(WS-CUST-REC)
+             RIDFLD(CUST-ID1)
+             UPDATE
+             RESP(WS-RESP)
+             END-EXEC
+            PERFORM CHECK-LOAN-LIMIT
+             PERFORM SAVE-LOGIC1
+             PERFORM XCTL-PARA
+            ELSE
+              PERFORM GET-NEXT-CUSTID
+              MOVE WS-CUST-ID TO CUST-ID1
+              MOVE CA-AADHAAR TO AADH-NO
+              PERFORM FETCH-AADHAAR
+              MOVE  CA-AADHAAR TO CUST-AADH
+              MOVE NAME1O TO CUST-NAME
+              MOVE DOBO   TO CUST-DOB
+             MOVE AADHAR2I TO NOM-AADH
+              MOVE 1 TO WS-LOAN-SEQ
+              PERFORM SAVE-LOGIC
+              PERFORM UPDATE-AADHAAR
+              END-IF.
+        CHECK-LOAN-LIMIT.
+      *       PERFORM VARYING WS-LOAN-SEQ FROM 1 BY 1
+      *          UNTIL WS-LOAN-SEQ > 5
+      *          IF LOAN-ID(WS-LOAN-SEQ) = 0
+      *          MOVE 'THIS IS 1ST LOAN' TO MESSAGO
+      *          END-IF
+      *          END-PERFORM
+      *          IF WS-LOAN-SEQ > 5
+      *            MOVE 'MAX 5 LOANS REACHED' TO MESSAGO
+      *          END-IF.
+            IF LOAN-SEQ < 5
+            exec cics send text from(ws-loan-seq) length(2) end-exec
+               ADD 1 TO WS-LOAN-SEQ
+            exec cics send text from(ws-loan-seq) length(2) end-exec
+               MOVE ws-loan-seq to loan-SEQ
+               MOVE CUST-ID TO LOANS(WS-LOAN-SEQ)(1:5)
+               MOVE WS-LOAN-SEQ TO LOANS(WS-LOAN-SEQ)(6:1)
+            ELSE
+             MOVE 'MAX 5 LOANS REACHED' TO MESSAGO
+           END-IF.
+      *     IF LOAN1-ID(6:1) > 5
+      *        ADD 1 TO LOAN1-ID
+      *        MOVE LOAN1-ID TO LOAN-ID
+      *        MOVE CUST-ID TO LOANS(WS-LOAN-SEQ)(1:5)
+      *        MOVE WS-LOAN-SEQ TO LOANS(WS-LOAN-SEQ)(6:1)
+      *     ELSE
+      *      MOVE 'MAX 5 LOANS REACHED' TO MESSAGO
+      *    END-IF.
+      *    EXEC CICS SEND TEXT FROM(LOAN-ID) LENGTH(6) END-EXEC.
+        GET-NEXT-CUSTID.
+             MOVE ZEROES TO LAST-CUST-ID1
+      *      MOVE 00001 TO SEQ-KEY
+             EXEC CICS READ
+                FILE('SEQFILE')
+                INTO(WS-SEQ-REC)
+                RIDFLD(LAST-CUST-ID1)
+                UPDATE
+                RESP(WS-RESP)
+                END-EXEC
+             ADD 1 TO SEQ-KEY
+             MOVE SEQ-KEY TO WS-CUST-ID
+             EXEC CICS REWRITE
+             FILE('SEQFILE')
+             FROM(WS-SEQ-REC)
+             END-EXEC.
+       SAVE-LOGIC.
+             MOVE AGEI     TO AGE2
+             MOVE GENDERI TO GENDER2
+             MOVE MOBILEI TO MOBILE2
+             MOVE ADDRE1I TO ADDRESS12
+             MOVE OCCUPAI  TO OCCUPATION
+             MOVE MONTHII  TO INCOME
+             MOVE NAME2I   TO NOM-NAME
+             MOVE RELATII  TO NOM-REL
+             MOVE MOBILE2I TO NOM-MOB
+             MOVE AADHAR2I TO NOM-AADH
+               STRING WS-CUST-ID DELIMITED BY SIZE
+                    WS-LOAN-SEQ  DELIMITED BY SIZE
+                  INTO WS-LOAN-ID
+             EXEC CICS SEND TEXT FROM(WS-LOAN-ID) LENGTH(6) END-EXEC
+             MOVE WS-LOAN-ID TO LOAN-ID(WS-LOAN-SEQ) LOAN-LOAN-ID
+             EXEC CICS WRITE
+             FILE('CUSTFL')
+             FROM(WS-CUST-REC)
+             RIDFLD(CUST-ID1)
+             END-EXEC.
+       SAVE-LOGIC1.
+               STRING WS-CUST-ID DELIMITED BY SIZE
+                    WS-LOAN-SEQ  DELIMITED BY SIZE
+                  INTO WS-LOAN-ID
+             EXEC CICS SEND TEXT FROM(WS-LOAN-ID) LENGTH(6) END-EXEC
+             MOVE WS-LOAN-ID TO LOAN-ID(WS-LOAN-SEQ) LOAN-LOAN-ID
+      *      EXEC CICS READ
+      *      FILE('CUSTFL')
+      *      FROM(WS-CUST-REC)
+      *      RIDFLD(CUST-ID1)
+      *\     UPDATE
+      *      END-EXEC
+             EXEC CICS REWRITE FILE('CUSTFL')
+             FROM(WS-CUST-REC)
+             END-EXEC.
+      *      STRING WS-CUST-ID  DELIMITED BY SIZE
+      *             WS-LOAN-SEQ DELIMITED BY SIZE
+      *             INTO WS-LOAN-ID
+      *      MOVE WS-LOAN-ID TO LOAN-ID(WS-LOAN-SEQ)
+      *      IF CA-EXIST = 'Y'
+      *       EXEC CICS REWRITE
+      *            FILE('CUSTFL')
+      *           FROM(CUST-ID1)
+      *           END-EXEC
+      *      ELSE
+      *          EXEC CICS WRITE
+      *           FILE('CUSTFL')
+      *            FROM(WS-CUST-REC)
+      *           RIDFLD(CUST-ID1)
+      *            END-EXEC
+      *      END-IF
+             MOVE 'DATA SAVED SUCCESSFULLY' TO MESSAGO.
+        UPDATE-AADHAAR.
+             EXEC CICS READ
+             FILE('AADHFILE')
+             INTO(WS-AADH-REC)
+             RIDFLD(CA-AADHAAR)
+             RESP(WS-RESP)
+             UPDATE
+             END-EXEC
+             MOVE 'Y'        TO EXIST-LOAN
+             IF CA-EXIST = 'Y'
+             MOVE CUST-ID1 TO CUST-ID
+             ELSE
+             MOVE WS-CUST-ID  TO CUST-ID
+             END-IF
+             EXEC CICS REWRITE
+             FILE('AADHFILE')
+             FROM(WS-AADH-REC)
+             END-EXEC
+             PERFORM XCTL-PARA.
+          XCTL-PARA.
+             MOVE MONTHII TO LOAN-INCOME
+             MOVE 'X' TO LOAN-SCREEN
+             MOVE NAME1I TO LOAN-NAME
+             MOVE CUST-ID1 TO LOAN-CUST-ID
+             MOVE LOANS(WS-LOAN-SEQ) TO LOAN-LOAN-ID
+             EXEC CICS XCTL PROGRAM('PMALC')
+                COMMAREA(LOAN-COM)
+                LENGTH(LENGTH OF LOAN-COM)
+                END-EXEC.
+       ERROR-EXIT.
+             EXIT.
+

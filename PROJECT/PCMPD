@@ -1,0 +1,113 @@
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. PCMPD.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        01 WS-RESP PIC S9(8) COMP.
+      * 01 WS-COMMAREA.
+      *   05 CA-CUSTID PIC 9(5).
+        01 WS-CUST-REC.
+           05 CUST-ID      PIC 9(5).
+           05 CUST-AADH    PIC X(12).
+           05 CUST-NAME    PIC X(20).
+           05 DOB          PIC X(10).
+           05 AGE          PIC 9(3).
+           05 GENDER       PIC X(6).
+           05 MOBILE       PIC X(10).
+           05 ADDRESS1     PIC X(23).
+           05 OCCUPATION   PIC X(20).
+           05 INCOME       PIC 9(6).
+           05 NOM-NAME     PIC X(20).
+           05 NOM-REL      PIC X(10).
+           05 NOM-MOB      PIC 9(10).
+           05 NOM-AADH     PIC X(12).
+           05 WS-LOAN-SEQ      PIC 9(1).
+           05 LOAN OCCURS 5 TIMES.
+           10 LOAN-ID      PIC 9(6).
+           05 REST         PIC X(2) VALUE SPACES.
+       01 LO-REC.
+           05 LO-SCREEN  PIC X.
+           05 LO-CUSTID  PIC 9(5).
+           COPY DFHAID.
+           COPY CMPD2.
+         LINKAGE SECTION.
+         01 DFHCOMMAREA.
+           05 CA-CUSTID PIC 9(5).
+         PROCEDURE DIVISION.
+         MAIN-PARA.
+              IF EIBCALEN = 0
+                 PERFORM FIRST-TIME
+              ELSE
+              EVALUATE EIBAID
+              WHEN DFHENTER
+             PERFORM PROCESS-SCREEN
+             WHEN DFHPF3
+             MOVE 'X' TO LO-SCREEN
+             MOVE CUSTIDI TO LO-CUSTID
+             EXEC CICS XCTL PROGRAM('PCMMU')
+               COMMAREA(LO-REC)
+               LENGTH(LENGTH OF LO-REC)
+             END-EXEC
+              END-IF.
+         FIRST-TIME.
+              MOVE LOW-VALUES TO CMPD2O
+               EXEC CICS SEND
+                    MAP('CMPD')
+                    MAPSET('CMPD2')
+                    FROM(CMPD2O)
+               END-EXEC
+               EXEC CICS RETURN
+                    TRANSID('TCPD')
+                    COMMAREA(CUST-ID)
+                    LENGTH(LENGTH OF CUST-ID)
+               END-EXEC.
+          PROCESS-SCREEN.
+                 EXEC CICS RECEIVE
+                      MAP('CMPD')
+                      MAPSET('CMPD2')
+                      INTO(CMPD2I)
+                 END-EXEC
+                 MOVE CUSTIDI TO CUST-ID
+      *          MOVE CUST-ID TO CA-CUSTID
+                  EXEC CICS READ
+                      FILE('CUSTFL')
+                      INTO(WS-CUST-REC)
+                      RIDFLD(CUST-ID)
+                      RESP(WS-RESP)
+                 END-EXEC
+                 IF WS-RESP NOT = DFHRESP(NORMAL)
+                    MOVE 'CUSTOMER NOT FOUND' TO MESSAGO
+                 EXEC CICS SEND
+                      MAP('CMPD')
+                      MAPSET('CMPD2')   ERASE
+                 END-EXEC
+                 EXEC CICS RETURN
+                      TRANSID('TCPD')
+                      COMMAREA(DFHCOMMAREA)
+                      LENGTH(LENGTH OF DFHCOMMAREA)
+                 END-EXEC
+                 ELSE
+                 MOVE CUST-ID      TO CUSTIDO
+                 MOVE CUST-NAME    TO NAME1O
+                 MOVE CUST-AADH    TO AADHAAO
+                 MOVE DOB          TO DOBO
+                 MOVE AGE          TO AGEO
+                 MOVE GENDER       TO GENDERO
+                 MOVE MOBILE       TO MOBILEO
+                 MOVE ADDRESS1     TO ADDRE1O
+                 MOVE OCCUPATION   TO OCCUPAO
+                 MOVE INCOME       TO MONTHIO
+                 MOVE NOM-NAME     TO NAME2O
+                 MOVE NOM-REL      TO RELATIO
+                 MOVE NOM-MOB      TO MOBILE2O
+                 MOVE NOM-AADH     TO AADHAR2O
+                 EXEC CICS SEND
+                      MAP('CMPD')
+                      MAPSET('CMPD2')  ERASE
+                 END-EXEC
+                 EXEC CICS RETURN
+                      TRANSID('TCPD')
+                      COMMAREA(DFHCOMMAREA)
+                      LENGTH(LENGTH OF DFHCOMMAREA)
+                 END-EXEC
+                END-IF.
+

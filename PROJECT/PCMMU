@@ -1,0 +1,97 @@
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. PCMMU.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        01 WS-RESP        PIC S9(8) COMP.
+        01 WS-OPTION      PIC X VALUE 'V'.
+        01 WS-COMMAREA.
+           05 CA-OPTION   PIC 9.
+           05 CA-MSG      PIC X(50).
+        COPY CMMU.
+        COPY DFHAID.
+        01 CMPH-REC.
+           05 PH-SCREEN  PIC X.
+           05 PH-CUSTID  PIC 9(5).
+        01 CMDE-REC.
+           05 DE-SCREEN PIC X.
+        LINKAGE SECTION.
+        01 DFHCOMMAREA.
+           05 CA-SCREEN PIC X.
+           05 CA-CUSTID PIC 9(5).
+        PROCEDURE DIVISION.
+        MAIN-LOGIC.
+            IF EIBCALEN = 0
+             PERFORM SEND-SCREEN
+            ELSE
+             IF CA-SCREEN = 'X'
+                  PERFORM SEND-SCREEN
+                  MOVE 'Y' TO CA-SCREEN
+             ELSE
+             EVALUATE EIBAID
+             WHEN DFHENTER
+                  PERFORM RECEIVE-SCREEN
+                  PERFORM PROCESS-OPTION
+                  PERFORM SEND-SCREEN
+             WHEN DFHPF3
+                  EXEC CICS XCTL PROGRAM('PLGN')
+                  END-EXEC
+             WHEN OTHER
+      *           MOVE 'WRONG CHOICE ' TO MSGO
+                  PERFORM SEND-SCREEN
+            END-IF
+               EXEC CICS RETURN
+                 TRANSID('TCMU')
+                 COMMAREA(DFHCOMMAREA)
+                 LENGTH(LENGTH OF DFHCOMMAREA)
+               END-EXEC.
+        RECEIVE-SCREEN.
+                       EXEC CICS RECEIVE
+                         MAP('CMMU')
+                         MAPSET('CMMU')
+                         INTO (CMMUO)
+                       END-EXEC.
+      *    MOVE OPTIONI TO WS-OPTION.
+         PROCESS-OPTION.
+           EVALUATE OPTIONI
+            WHEN 1
+             MOVE CA-CUSTID TO PH-CUSTID
+             MOVE 'X' TO PH-SCREEN
+             EXEC CICS XCTL PROGRAM('PCMOV')
+                            COMMAREA(CMPH-REC)
+                            LENGTH(LENGTH OF CMPH-REC)
+             END-EXEC
+            WHEN 2
+             MOVE CA-CUSTID TO PH-CUSTID
+             MOVE 'X' TO PH-SCREEN
+             EXEC CICS XCTL PROGRAM('PCMPS')
+             END-EXEC
+            WHEN 3
+             MOVE CA-CUSTID TO PH-CUSTID
+             MOVE 'X' TO PH-SCREEN
+             EXEC CICS XCTL PROGRAM('PCMPH')
+                            COMMAREA(CMPH-REC)
+                            LENGTH(LENGTH OF CMPH-REC)
+             END-EXEC
+            WHEN 4
+             MOVE 'X' TO DE-SCREEN
+             EXEC CICS XCTL PROGRAM('PCMDE')
+                            COMMAREA(CMDE-REC)
+                            LENGTH(LENGTH OF CMDE-REC)
+             END-EXEC
+            WHEN 5
+             MOVE 'X' TO DE-SCREEN
+             MOVE CA-CUSTID TO PH-CUSTID
+             EXEC CICS XCTL PROGRAM('PCMPU')
+                            COMMAREA(CMDE-REC)
+                            LENGTH(LENGTH OF CMDE-REC)
+             END-EXEC
+           END-EVALUATE.
+          SEND-SCREEN.
+            MOVE LOW-VALUES TO CMMUO
+            EXEC CICS SEND
+             MAP('CMMU')
+             MAPSET('CMMU')
+             FROM(CMMUI)
+             ERASE
+            END-EXEC.
+

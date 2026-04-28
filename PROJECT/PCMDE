@@ -1,0 +1,320 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EMPUPD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-RESP        PIC S9(8) COMP.
+       01 I PIC 9.
+       01 EOF PIC X VALUE 'N'.
+       01 CUST-ID1 PIC 9(5).
+       01 LOAN-ID1 PIC 9(6).
+       01 WS-DISP PIC 9(8).
+       01 CUST-REC.
+          05 CUST-ID2  PIC X(5).
+          05 NEST      PIC X(195).
+       01 LOAN-REC PIC X(200).
+       01 WS-DATE PIC X(10).
+       01 WS-ABSTIME PIC X(10).
+       01 DISPUTE-REC.
+          05 DISPUTE-ID PIC 9(11).
+          05 CUST-ID    PIC 9(5).
+          05 LOAN-ID     PIC 9(6).
+          05 DATE1      PIC X(10) VALUE SPACES.
+          05 D-AMT PIC 9(6).
+          05 D-TYPE   PIC 9.
+          05 RESPONSE PIC X(20).
+          05 REST PIC X(21) VALUE SPACES.
+       01 TRANS-REC.
+          05 TRANS-ID  PIC 9(11).
+          05 FILLER PIC X(25) VALUE SPACES.
+          05 T-AMT PIC 9(5).
+          05 T-DATE PIC X(10).
+          05 FILLER PIC X(10) VALUE SPACES.
+          05 T-AC-NO PIC X(10).
+          05 FILLER PIC X(25) VALUE SPACES.
+       01 BANK-REC.
+          05 BANK-ID  PIC X(11).
+          05 FILLER PIC X(31) VALUE SPACES.
+          05 B-AMT PIC 9(6).
+          05 FILLER PIC X.
+          05 B-DATE PIC X(10).
+          05 FILLER PIC X(21).
+       01 MU-COMMAREA.
+          05 MU-SCREEN PIC X.
+          05 MU-CUSTID PIC 9(5).
+       COPY CMDE.
+       COPY DFHAID.
+       LINKAGE SECTION.
+       01  DFHCOMMAREA.
+           05 CA-SCREEN PIC X.
+           05 CA-CUSTID PIC X(5).
+           05 CA-LOANID PIC X(6).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+            IF EIBCALEN = 0
+                MOVE LOW-VALUES TO CMDEO
+                PERFORM SEND-SCREEN
+            ELSE
+               IF CA-SCREEN = 'X'
+                   MOVE LOW-VALUES TO CMDEO
+                   PERFORM SEND-SCREEN
+                   MOVE 'Y' TO CA-SCREEN
+                   EXEC CICS RETURN
+                             TRANSID('TCDE')
+                             COMMAREA(DFHCOMMAREA)
+                             LENGTH(LENGTH OF DFHCOMMAREA)
+                   END-EXEC
+               ELSE
+                EVALUATE EIBAID
+                WHEN DFHENTER
+                   PERFORM PROCESS-INPUT
+                WHEN DFHPF3
+                   MOVE 'X' TO MU-SCREEN
+                   MOVE CA-CUSTID TO MU-CUSTID
+                   EXEC CICS XCTL
+                             PROGRAM('PCMMU')
+                             COMMAREA(MU-COMMAREA)
+                             LENGTH(LENGTH OF MU-COMMAREA)
+                   END-EXEC
+                WHEN OTHER
+                   MOVE 'WRONG KEY PRESSED' TO MSGO
+                   PERFORM SEND-SCREEN
+                END-EVALUATE
+            END-IF.
+
+       SEND-SCREEN.
+             EXEC CICS SEND
+                  MAP('CMDE')
+                  MAPSET('CMDE')
+                  FREEKB
+                  ERASE
+             END-EXEC.
+       PROCESS-INPUT.
+            EXEC CICS RECEIVE
+                 MAP('CMDE')
+                 MAPSET('CMDE')
+            END-EXEC
+
+            MOVE LOANIDI TO DISPUTE-ID(1:6)
+            MOVE DDI TO DISPUTE-ID(7:2)
+            MOVE MMI TO DISPUTE-ID(9:2)
+            MOVE 1 TO DISPUTE-ID(10:1)
+            PERFORM VALIDATION-PARA
+
+            MOVE USERIDI TO CUST-ID
+            MOVE LOANIDI TO LOAN-ID
+            MOVE AMTI TO D-AMT
+            MOVE DDI TO DATE1(1:2)
+            MOVE '/' TO DATE1(3:1)
+            MOVE MMI TO DATE1(4:2)
+            MOVE '/' TO DATE1(6:1)
+            MOVE YYYYI TO DATE1(7:4)
+            MOVE OPTIONI TO D-TYPE
+            IF D-TYPE = 1
+               PERFORM RECOVERY-PARA
+            ELSE
+               IF D-TYPE = 2
+                  PERFORM DUPLICATE-PARA
+               END-IF
+            END-IF
+            EXEC CICS WRITE
+                 FILE('DISPFL')
+                 FROM(DISPUTE-REC)
+                 RIDFLD(DISPUTE-ID)
+                 RESP(WS-RESP)
+            END-EXEC
+
+             IF WS-RESP NOT = DFHRESP(NORMAL)
+                MOVE 'SOME PROBLEM' TO MSGO
+                PERFORM SEND-SCREEN
+                EXEC CICS RETURN
+                          TRANSID('TCDE')
+                          COMMAREA(DFHCOMMAREA)
+                          LENGTH(LENGTH OF DFHCOMMAREA)
+                END-EXEC
+             END-IF.
+             MOVE 'DISPUTE SENT ' TO MSGO
+             PERFORM SEND-SCREEN
+             EXEC CICS XCTL
+                       PROGRAM('PCMMU')
+                       COMMAREA(DFHCOMMAREA)
+                       LENGTH(LENGTH OF DFHCOMMAREA)
+             END-EXEC.
+       VALIDATION-PARA.
+             MOVE USERIDI TO CUST-ID2
+             EXEC CICS READ
+                        FILE('CUSTFL')
+                        RIDFLD(CUST-ID2)
+                        INTO(CUST-REC)
+                        RESP(WS-RESP)
+             END-EXEC
+             IF WS-RESP NOT = DFHRESP(NORMAL)
+                MOVE 'CUSTID NOT FOUND' TO MSGO
+                PERFORM SEND-SCREEN
+                EXEC CICS RETURN
+                          TRANSID('TCDE')
+                          COMMAREA(DFHCOMMAREA)
+                          LENGTH(LENGTH OF DFHCOMMAREA)
+                END-EXEC
+             END-IF
+             MOVE LOANIDI TO LOAN-ID1
+             EXEC CICS READ
+                        FILE('LOANFIL1')
+                        RIDFLD(LOAN-ID1)
+                        INTO(LOAN-REC)
+                        RESP(WS-RESP)
+             END-EXEC
+             IF WS-RESP NOT = DFHRESP(NORMAL)
+                MOVE 'LOANID NOT FOUND' TO MSGO
+                PERFORM SEND-SCREEN
+                EXEC CICS RETURN
+                          TRANSID('TCDE')
+                          COMMAREA(DFHCOMMAREA)
+                          LENGTH(LENGTH OF DFHCOMMAREA)
+                END-EXEC
+             END-IF
+      *      MOVE DISPUTE-ID(1:8) TO WS-DISP
+             EXEC CICS READ
+                          FILE('DISPFL')
+                          RIDFLD(DISPUTE-ID)
+                          KEYLENGTH(10)
+                          INTO(DISPUTE-REC)
+                          GENERIC
+                          RESP(WS-RESP)
+             END-EXEC
+             IF WS-RESP = DFHRESP(NORMAL)
+                IF D-TYPE = OPTIONI
+                   MOVE 'DISPUTE ALREADY EXISTS' TO MSGO
+                   PERFORM SEND-SCREEN
+                   EXEC CICS RETURN
+                             TRANSID('TCDE')
+                             COMMAREA(DFHCOMMAREA)
+                             LENGTH(LENGTH OF DFHCOMMAREA)
+                   END-EXEC
+                ELSE
+                   ADD 1  TO DISPUTE-ID
+                END-IF
+             END-IF
+             EXEC CICS SEND TEXT FROM(OPTIONI) LENGTH(1) END-EXEC
+             IF OPTIONI NOT = 1 AND OPTIONI NOT = 2
+                MOVE 'WRONG DISPUTE TYPE' TO MSGO
+                PERFORM SEND-SCREEN
+                EXEC CICS RETURN
+                          TRANSID('TCDE')
+                          COMMAREA(DFHCOMMAREA)
+                          LENGTH(LENGTH OF DFHCOMMAREA)
+                END-EXEC
+             END-IF
+             EXEC CICS ASKTIME
+             ABSTIME(WS-ABSTIME)
+             END-EXEC
+             EXEC CICS FORMATTIME
+             ABSTIME(WS-ABSTIME)
+             DDMMYYYY(WS-DATE)
+             DATESEP('/')
+             END-EXEC.
+       DUPLICATE-PARA.
+            MOVE LOAN-ID TO TRANS-ID(1:6)
+            MOVE DDI TO TRANS-ID(7:2)
+            MOVE MMI TO TRANS-ID(9:2)
+            MOVE '1' TO TRANS-ID(10:1)
+      * TRANFL IS ONLINE PAYMETS TRANSACTION FILE  FOR THAT DAY ONLY
+      * TRANSID = LOANID + DDMM+1/2 IF 2 DUPLICATE
+      * WHILE MOVING IT TO WHOLE TRANSACTIONS MOVE IT AS LOANID + DDMM
+            EXEC CICS STARTBR FILE('TRANSFL')
+                           RIDFLD(TRANS-ID)
+                           KEYLENGTH(6)
+                           GENERIC
+                           RESP(WS-RESP)
+            END-EXEC
+            EXEC CICS READNEXT
+                            FILE('TRANSFL')
+                            RIDFLD(TRANS-ID)
+                            KEYLENGTH(6)
+                            INTO(TRANS-REC)
+                            RESP(WS-RESP)
+            END-EXEC
+            IF WS-RESP NOT = DFHRESP(NORMAL)
+               MOVE 'TRANSACTION NOT FOUND' TO MSGO
+            ELSE
+            EXEC CICS READNEXT
+                            FILE('TRANSFL')
+                            RIDFLD(TRANS-ID)
+                            KEYLENGTH(6)
+                            INTO(TRANS-REC)
+                            RESP(WS-RESP)
+            END-EXEC
+            IF WS-RESP NOT = DFHRESP(NORMAL)
+              IF LOAN-ID NOT = TRANS-ID(1:6)
+               MOVE 'DUPLICATE TRANS NOT FOUND' TO MSGO
+              ELSE
+              IF DATE1 = T-DATE
+               MOVE 'DUPLICATE TRANS FOUND' TO MSGO
+               MOVE 'Y' TO RESPONSE(1:2)
+               MOVE 'Y' TO EOF
+               MOVE T-AMT TO RESPONSE(3:6)
+               MOVE T-AC-NO TO RESPONSE(10:10)
+               END-IF
+            END-IF.
+            IF EOF = 'Y'
+               MOVE 'N' TO EOF
+               EXEC CICS ENDBR
+                         FILE('TRANSFL')
+                         RESP(WS-RESP)
+               END-EXEC
+            END-IF.
+       RECOVERY-PARA.
+            MOVE LOAN-ID TO BANK-ID(1:6)
+            MOVE '1' TO BANK-ID(7:1)
+            EXEC CICS STARTBR FILE('BANKFL')
+                           RIDFLD(BANK-ID)
+                           KEYLENGTH(6)
+                           GENERIC
+                           RESP(WS-RESP)
+            END-EXEC
+            EXEC CICS READNEXT
+                            FILE('BANKFL')
+                            RIDFLD(BANK-ID)
+                            KEYLENGTH(6)
+                            INTO(BANK-REC)
+                            RESP(WS-RESP)
+            END-EXEC
+            IF WS-RESP NOT = DFHRESP(NORMAL)
+               MOVE 'BANK TRANS NOT FOUND' TO MSGO
+            ELSE
+               IF B-DATE = DATE1
+                  ADD 1 TO I
+               END-IF
+            END-IF
+      *     PERFORM UNTIL EOF = 'Y'
+            EXEC CICS READNEXT
+                            FILE('BANKFL')
+                            RIDFLD(BANK-ID)
+                            KEYLENGTH(6)
+                            INTO(BANK-REC)
+                            RESP(WS-RESP)
+            END-EXEC
+            IF WS-RESP NOT = DFHRESP(NORMAL)
+              IF LOAN-ID NOT = BANK-ID(1:6)
+               MOVE 'DUPLICATE TRANS NOT FOUND' TO MSGO
+            ELSE
+              IF DATE1 = B-DATE AND B-AMT = D-AMT
+               ADD 1 TO I
+               MOVE 'DUPLICATE TRANS FOUND' TO MSGO
+               MOVE 'Y' TO RESPONSE(1:2)
+               MOVE 'Y' TO EOF
+               MOVE T-AMT TO RESPONSE(3:6)
+               MOVE T-AC-NO TO RESPONSE(10:10)
+               END-IF
+            END-IF
+      *     END-PERFROM
+      *     IF I >= 2
+      *
+      *     END-IF
+            IF EOF = 'Y'
+               MOVE 'N' TO EOF
+               EXEC CICS ENDBR
+                         FILE('TRANSFL')
+                         RESP(WS-RESP)
+               END-EXEC
+            END-IF.
+

@@ -1,0 +1,210 @@
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. PCMOV.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        01 WS-RESP                 PIC S9(8) COMP.
+        01 WS-I                    PIC 9 VALUE 1.
+      * 01 WS-COMMAREA.
+      *    05 CA-CUST-ID            PIC 9(5).
+        01 WS-CUST-REC.
+          05 CUST-ID1       PIC 9(5).
+          05 CUST-AADH      PIC X(12).
+          05 CUST-NAME      PIC X(20).
+          05 CUST-DOB       PIC X(10).
+          05 AGE            PIC 9(3).
+          05 GENDER         PIC X(6).
+          05 MOBILE         PIC X(10).
+          05 ADDRESS2       PIC X(23).
+          05 OCCUPATION     PIC X(20).
+          05 INCOME         PIC 9(6).
+          05 NOM-NAME       PIC X(20).
+          05 NOM-REL        PIC X(10).
+          05 NOM-MOB        PIC 9(10).
+          05 NOM-AADH       PIC X(12).
+          05 WS-LOAN-SEQ        PIC 9(1).
+          05 LOANS OCCURS 5 TIMES.
+             10 CUST-LOAN-ID     PIC 9(6).
+          05 FILLER        PIC X(2) VALUE SPACES.
+        01 WS-LOAN-REC.
+           05 LOAN-ID         PIC 9(6).
+           05 CUST-ID         PIC 9(5).
+           05 SANC-AMT        PIC 9(6).
+           05 EMI-START       PIC X(10).
+           05 EMI-END         PIC X(10).
+           05 INTEREST        PIC 9(2).
+           05 EMI-AMT         PIC 9(6).
+           05 GRACE-DAYS      PIC 9(2).
+           05 PENALTY-AMT     PIC 9(3).
+           05 PAY-MODE        PIC X(3).
+           05 PROC-DATE       PIC X(10).
+           05 TOTAL-PAID      PIC 9(6).
+           05 NEXT-DUE        PIC 9(6).
+           05 STATUS1         PIC X(6).
+           05 TENURE          PIC 9(3).
+           05 OVERDUE-AMT     PIC 9(6).
+           05 NO-OF-EMI       PIC 9(3).
+           05 FORECLOSURE     PIC 9(6).
+           05 DUE-DAYS        PIC 9(3).
+           05 DUE-AMT         PIC 9(6).
+           05 RISK-SCORE      PIC 99.
+             COPY DFHAID.
+             COPY CMOV.
+         LINKAGE SECTION.
+         01 DFHCOMMAREA.
+              05 CA-SCREEN      PIC X.
+              05 CA-CUST-ID     PIC 9(5).
+          PROCEDURE DIVISION.
+          MAIN-PARA.
+                IF EIBCALEN = 0
+                  PERFORM FIRST-TIME
+                 ELSE
+                  IF CA-SCREEN = 'A' OR 'X' OR 'M'
+                      EVALUATE CA-SCREEN
+                       WHEN 'M'
+                            MOVE DFHENTER TO EIBAID
+                            MOVE 'S' TO CA-SCREEN
+                            PERFORM PROCESS-SCREEN
+                       WHEN 'A'
+                            MOVE DFHENTER TO EIBAID
+                            MOVE 'G' TO CA-SCREEN
+                            PERFORM PROCESS-SCREEN
+                       WHEN 'X'
+                            MOVE DFHENTER TO EIBAID
+                            MOVE 'C' TO CA-SCREEN
+                            PERFORM PROCESS-SCREEN
+                       WHEN OTHER
+                            CONTINUE
+                      END-EVALUATE
+                  ELSE
+                       PERFORM PROCESS-SCREEN
+                END-IF.
+          FIRST-TIME.
+                MOVE LOW-VALUES TO CMOVO
+                EXEC CICS SEND
+                   MAP('CMOV')
+                   MAPSET('CMOV')
+                   FROM(CMOVO)
+                  END-EXEC
+                EXEC CICS RETURN
+                   TRANSID('TCOV')
+                    COMMAREA(DFHCOMMAREA)
+                    LENGTH(LENGTH OF DFHCOMMAREA)
+                 END-EXEC.
+         PROCESS-SCREEN.
+      *         IF CA-SCREEN NOT = 'X'
+      *            EXEC CICS RECEIVE  MAP('CMOV')
+      *              MAPSET('CMOV')
+      *              INTO(CMOVI)
+      *              END-EXEC
+      *         END-IF
+                MOVE LOW-VALUES TO CMOVO
+                 EVALUATE EIBAID
+                  WHEN DFHPF3
+                       EVALUATE CA-SCREEN
+                       WHEN 'S'
+                         MOVE 'X' TO CA-SCREEN
+                         EXEC CICS XCTL PROGRAM('PMADEL')
+                                        COMMAREA(DFHCOMMAREA)
+                                        LENGTH(LENGTH OF DFHCOMMAREA)
+                         END-EXEC
+                       WHEN 'G'
+                         MOVE 'X' TO CA-SCREEN
+                         EXEC CICS XCTL PROGRAM('PAGDEL')
+                                        COMMAREA(DFHCOMMAREA)
+                                        LENGTH(LENGTH OF DFHCOMMAREA)
+                         END-EXEC
+                       WHEN 'C'
+                         MOVE 'X' TO CA-SCREEN
+                         EXEC CICS XCTL PROGRAM('PCMMU')
+                                        COMMAREA(DFHCOMMAREA)
+                                        LENGTH(LENGTH OF DFHCOMMAREA)
+                         END-EXEC
+                  END-EVALUATE
+                  WHEN DFHENTER
+      *                 PERFORM VALIDATE-CUST
+                        PERFORM READ-CUSTFILE
+                        PERFORM READ-LOANS
+                        PERFORM SEND-SCREEN
+                    WHEN DFHPF5
+                        EXEC CICS XCTL PROGRAM('PCMPD')
+                        COMMAREA(DFHCOMMAREA)
+                        LENGTH(LENGTH OF DFHCOMMAREA)
+                        END-EXEC
+                    END-EVALUATE.
+      **VALIDATE-CUST.
+      *             IF CUSTIDI = ZERO OR SPACES
+      *             MOVE 'ENTER CUSTOMER ID' TO TITLEO
+      *             PERFORM SEND-SCREEN
+      *             END-IF
+      *            MOVE CUSTIDI TO CUST-ID1
+      *            MOVE CUSTIDI TO CA-CUST-ID.
+        READ-CUSTFILE.
+                MOVE CA-CUST-ID TO CUST-ID1
+                EXEC CICS READ  FILE('CUSTFL')
+                INTO(WS-CUST-REC)
+                RIDFLD(CUST-ID1)
+                RESP(WS-RESP)
+                END-EXEC
+               IF WS-RESP NOT = DFHRESP(NORMAL)
+                MOVE 'CUSTOMER NOT FOUND' TO TITLEO
+                PERFORM SEND-SCREEN
+               END-IF
+              MOVE CUST-ID1    TO CUSTIDO
+              MOVE CUST-NAME   TO NAMEINO
+              MOVE OCCUPATION  TO OCCUO.
+        READ-LOANS.
+               PERFORM VARYING WS-I FROM 1 BY 1
+                       UNTIL WS-I > WS-LOAN-SEQ
+                 MOVE CUST-LOAN-ID(WS-I) TO LOAN-ID
+                EXEC CICS READ  FILE('LOANFIL1')
+                 INTO(WS-LOAN-REC)
+                  RIDFLD(LOAN-ID)
+                  RESP(WS-RESP)
+                 END-EXEC
+                IF WS-RESP = DFHRESP(NORMAL)
+                     PERFORM MOVE-TO-MAP
+                 END-IF
+                END-PERFORM.
+       MOVE-TO-MAP.
+              EVALUATE WS-I
+               WHEN 1
+                 MOVE LOAN-ID     TO L1IDO
+                 MOVE EMI-AMT     TO EDI1O
+                 MOVE STATUS1     TO ST1O
+                 MOVE EMI-START   TO SD1O
+                  MOVE EMI-END     TO ED1O
+                 MOVE TENURE      TO TEN1O
+                 MOVE OVERDUE-AMT TO OD1O
+                 MOVE SANC-AMT    TO SAN1O
+                 MOVE INTEREST    TO ROI1O
+                 MOVE NO-OF-EMI   TO EDI1AO
+                 MOVE PENALTY-AMT TO PENAL1O
+                 MOVE 000       TO DUE1O
+                 MOVE DUE-AMT  TO DUEAMT1O
+                 MOVE FORECLOSURE  TO FORCL1O
+               WHEN 2
+                 MOVE LOAN-ID     TO L2IDO
+                 MOVE EMI-AMT     TO EDI2O
+                 MOVE STATUS1     TO ST2O
+                 MOVE EMI-START   TO SD2O
+                  MOVE EMI-END     TO ED2O
+                 MOVE TENURE      TO TEN2O
+                 MOVE OVERDUE-AMT TO OD2O
+                 MOVE SANC-AMT    TO SAN2O
+                 MOVE INTEREST    TO ROI2O
+                 MOVE NO-OF-EMI   TO EDI1AO
+                 MOVE PENALTY-AMT TO PENAL1O
+                 MOVE 000       TO DUE1O
+                 MOVE DUE-AMT  TO DUEAMT1O
+            END-EVALUATE.
+
+         SEND-SCREEN.
+                 EXEC CICS SEND  MAP('CMOV')
+                  MAPSET('CMOV')  ERASE   FREEKB
+                   END-EXEC
+                  EXEC CICS RETURN
+                   TRANSID('TCOV')
+                   COMMAREA(DFHCOMMAREA)
+                   LENGTH(LENGTH OF DFHCOMMAREA)
+                   END-EXEC.
+

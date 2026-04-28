@@ -1,0 +1,780 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AGCTPROG.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+       01 WS-COMMAREA PIC X(28).
+       01 WS-ABSTIME PIC X(10).
+       01 WS-DATE.
+          05 DD PIC 99.
+          05 A  PIC X VALUE '/'.
+          05 MM PIC 99.
+          05 B  PIC X VALUE '/'.
+          05 YYYY PIC 9999.
+       01 EOF PIC X VALUE 'N'.
+       01 EOD PIC X VALUE 'N'.
+       01 WS-TSQ-NAME        PIC X(10) VALUE 'DAYTARGETS'.
+       01 WS-RESP            PIC S9(8) COMP.
+       01 WS-I               PIC S9(4) COMP.
+       01 WS-TEMP-INDEX      PIC S9(4) COMP.
+       01 WS-TOTAL-TARGET    PIC 9(9) VALUE 0.
+       01 WS-TOTAL-COLLECTED PIC 9(9) VALUE 0.
+       01 LOAN-REC.
+          05 LOAN-ID PIC X(6).
+          05 CUST-ID PIC X(5).
+          05 NAME    PIC X(10).
+          05 STATUS1 PIC X(08).
+          05 ACTAMT PIC 9(6).
+          05 REAT    PIC X(45) VALUE SPACES.
+       01 WS-REC.
+          05 WS-LOANID       PIC X(6).
+          05 WS-CUSTID       PIC X(5).
+          05 WS-NAME         PIC X(10).
+          05 WS-STATUS       PIC X(8).
+          05 WS-ACTAMT       PIC 9(6).
+          05 WS-AMTPAID      PIC 9(6).
+       01 WS-OUT-REC.
+          05 O-TRANSID       PIC X(11).
+          05 O-LOANID        PIC X(6).
+          05 O-CUSTID        PIC X(5).
+          05 O-NAME          PIC X(10).
+          05 O-STATUS        PIC X(8).
+          05 O-ACTAMT        PIC 9(6).
+          05 O-PAID          PIC 9(6).
+          05 O-PTYPE         PIC X.
+          05 O-YORN          PIC X.
+          05 BEAT            PIC X(26).
+       01 AG-REC.
+          05 AG-SCREEN PIC X.
+          05 AG-AGENTID PIC X(5).
+       01 WS-COUNT          PIC 999.
+      *----------------------------------------------------------------*
+             COPY AGCT.
+             COPY DFHAID.
+      *----------------------------------------------------------------*
+
+      *----------------------------------------------------------------*
+      * COMMAREA
+      *----------------------------------------------------------------*
+       LINKAGE SECTION.
+       01 DFHCOMMAREA.
+          05 CA-SCREEN       PIC X.
+          05 CA-AGENTID      PIC 9(5).
+          05 CA-INDEX        PIC 9(4).
+          05 CA-TOTAL        PIC 9(4).
+          05 CA-TOTAL-TARGET     PIC 9(9).
+          05 CA-TOTAL-COLLECTED  PIC 9(9).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           IF EIBCALEN = 0
+              MOVE LOW-VALUES TO AGCTO
+      *       MOVE CA-AGENTID TO AGENTIDO
+              PERFORM LOAD-TSQ
+              PERFORM DISPLAY-PARA
+              EXEC CICS RETURN
+                   TRANSID('TACT')
+                   COMMAREA(WS-COMMAREA)
+                   LENGTH(LENGTH OF WS-COMMAREA)
+              END-EXEC
+           ELSE
+              MOVE 1 TO CA-INDEX
+              MOVE 0 TO CA-TOTAL-COLLECTED
+              MOVE 'Y' TO CA-SCREEN
+           IF CA-SCREEN = 'X'
+              MOVE 'Y' TO CA-SCREEN
+              MOVE 0 TO CA-TOTAL-COLLECTED
+              MOVE LOW-VALUES TO AGCTO
+              MOVE CA-AGENTID TO AGENTIDO
+              PERFORM LOAD-TSQ
+              PERFORM DISPLAY-PARA
+              EXEC CICS RETURN
+                   TRANSID('TACT')
+                   COMMAREA(WS-COUNT)
+                   LENGTH(3)
+              END-EXEC
+              CONTINUE
+           ELSE
+              MOVE 1 TO CA-INDEX
+              MOVE CA-AGENTID TO AGENTIDO
+           EVALUATE EIBAID
+
+              WHEN DFHENTER
+                   PERFORM RECEIVE-PARA
+                   PERFORM SAVE-DATA
+                   EXEC CICS SEND MAP('AGCT') MAPSET('AGCT')
+                   END-EXEC
+                   EXEC CICS RETURN
+                             TRANSID('TACT')
+                             COMMAREA(DFHCOMMAREA)
+                             LENGTH(LENGTH OF DFHCOMMAREA)
+                   END-EXEC
+                   CONTINUE
+              WHEN DFHPF8
+                   PERFORM NEXT-PAGE
+                   PERFORM DISPLAY-PARA
+              WHEN DFHPF7
+                   PERFORM PREV-PAGE
+                   PERFORM DISPLAY-PARA
+              WHEN DFHPF3
+                 MOVE 'X' TO AG-SCREEN
+                 MOVE CA-AGENTID TO AG-AGENTID
+                 EXEC CICS XCTL PROGRAM('PAGMU')
+                 END-EXEC
+      *                    COMMAREA(AG-REC)
+      *                    LENGTH(LENGTH OF AG-REC)
+           END-EVALUATE
+
+
+
+           EXEC CICS RETURN
+                TRANSID('TACT')
+                COMMAREA(DFHCOMMAREA)
+                LENGTH(LENGTH OF DFHCOMMAREA)
+           END-EXEC
+           END-IF.
+       RECEIVE-PARA.
+            EXEC CICS RECEIVE MAP('AGCT')
+                              MAPSET('AGCT')
+            END-EXEC.
+
+      *----------------------------------------------------------------*
+      * LOAD FILE INTO TSQ (ONLY FIRST TIME)
+      *----------------------------------------------------------------*
+       LOAD-TSQ.
+           IF EIBCALEN > 0
+           MOVE 0 TO CA-TOTAL
+           END-IF
+           EXEC CICS DELETEQ TS
+                QUEUE(WS-TSQ-NAME)
+                RESP(WS-RESP)
+           END-EXEC
+
+           MOVE LOW-VALUES  TO  LOAN-ID
+              EXEC CICS STARTBR
+                              FILE('DTGETAG')
+                              RIDFLD(LOAN-ID)
+                              RESp(WS-RESP)
+              END-EXEC
+               EXEC CICS READNEXT
+                            FILE('DTGETAG')
+                            RIDFLD(LOAN-ID)
+                            INTO(LOAN-REC)
+                            RESP(WS-RESP)
+               END-EXEC
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL EOF = 'Y'
+             IF WS-RESP = DFHRESP(NORMAL)
+              MOVE CUST-ID      TO WS-CUSTID
+              MOVE LOAN-ID     TO WS-LOANID
+              MOVE NAME        TO WS-NAME
+              MOVE STATUS1     TO WS-STATUS
+              MOVE ACTAMT     TO WS-ACTAMT
+              MOVE ZEROES TO WS-AMTPAID
+              EXEC CICS WRITEQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   FROM(WS-REC)
+                   ITEM(WS-I)
+                   MAIN
+              END-EXEC
+
+               EXEC CICS READNEXT
+                            FILE('DTGETAG')
+                            RIDFLD(LOAN-ID)
+                            INTO(LOAN-REC)
+                            RESP(WS-RESP)
+               END-EXEC
+               IF WS-RESP = DFHRESP(ENDFILE)
+                   MOVE 'Y' TO EOF
+                   EXEC CICS ENDBR
+                             FILE('DTGETAG')
+                             RESP(WS-RESP)
+                   END-EXEC
+               END-IF
+              IF EIBCALEN > 0
+              ADD 1 TO CA-TOTAL
+              END-IF
+              COMPUTE WS-TOTAL-TARGET = WS-TOTAL-TARGET + WS-ACTAMT
+             END-IF
+           END-PERFORM
+           IF EIBCALEN > 0
+           MOVE WS-TOTAL-TARGET TO CA-TOTAL-TARGET
+           ELSE
+           MOVE WS-TOTAL-TARGET TO TARGETO
+           MOVE ZEROES TO TARGETO
+           END-IF.
+      *----------------------------------------------------------------*
+      * DISPLAY PAGE (10 RECORDS)
+      *----------------------------------------------------------------*
+       DISPLAY-PARA.
+           IF EIBCALEN > 0
+           MOVE CA-INDEX TO WS-TEMP-INDEX
+           MOVE WS-TOTAL-TARGET TO TARGETO
+           MOVE CA-TOTAL-COLLECTED TO ACTUALO
+           ELSE
+           MOVE 1 TO WS-TEMP-INDEX
+           END-IF
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+                                            OR EOD = 'Y'
+              EXEC CICS READQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   ITEM(WS-TEMP-INDEX)
+                   INTO(WS-REC)
+                   RESP(WS-RESP)
+              END-EXEC
+
+              IF WS-RESP NOT = DFHRESP(NORMAL)
+                 MOVE 'Y' TO EOD
+              END-IF
+
+              EVALUATE WS-I
+                 WHEN 1
+                    MOVE WS-CUSTID TO CUST1O
+                    MOVE WS-LOANID TO LOAN1O
+                    MOVE WS-NAME   TO NAME1O
+                    MOVE WS-STATUS TO STATS1O
+                    MOVE WS-ACTAMT TO ACTU1O
+                    MOVE ZEROES    TO PAID1O
+                 WHEN 2
+                    MOVE WS-CUSTID TO CUST2O
+                    MOVE WS-LOANID TO LOAN2O
+                    MOVE WS-NAME   TO NAME2O
+                    MOVE WS-STATUS TO STATS2O
+                    MOVE WS-ACTAMT TO ACTU2O
+                    MOVE ZEROES    TO PAID2O
+                 WHEN 3
+                    MOVE WS-CUSTID TO CUST3O
+                    MOVE WS-LOANID TO LOAN3O
+                    MOVE WS-NAME   TO NAME3O
+                    MOVE WS-STATUS TO STATS3O
+                    MOVE WS-ACTAMT TO ACTU3O
+                    MOVE ZEROES    TO PAID3O
+                 WHEN 4
+                    MOVE WS-CUSTID TO CUST4O
+                    MOVE WS-LOANID TO LOAN4O
+                    MOVE WS-NAME   TO NAME4O
+                    MOVE WS-STATUS TO STATS4O
+                    MOVE WS-ACTAMT TO ACTU4O
+                    MOVE ZEROES    TO PAID4O
+                 WHEN 5
+                      MOVE WS-CUSTID TO CUST5O
+                      MOVE WS-LOANID TO LOAN5O
+                      MOVE WS-NAME   TO NAME5O
+                      MOVE WS-STATUS TO STATS5O
+                      MOVE WS-ACTAMT TO ACTU5O
+                      MOVE ZEROES    TO PAID5O
+                 WHEN 6
+                      MOVE WS-CUSTID TO CUST6O
+                      MOVE WS-LOANID TO LOAN6O
+                      MOVE WS-NAME   TO NAME6O
+                      MOVE WS-STATUS TO STATS6O
+                      MOVE WS-ACTAMT TO ACTU6O
+                      MOVE ZEROES    TO PAID6O
+                 WHEN 7
+                      MOVE WS-CUSTID TO CUST7O
+                      MOVE WS-LOANID TO LOAN7O
+                      MOVE WS-NAME   TO NAME7O
+                      MOVE WS-STATUS TO STATS7O
+                      MOVE WS-ACTAMT TO ACTU7O
+                      MOVE ZEROES    TO PAID7O
+                 WHEN 8
+                      MOVE WS-CUSTID TO CUST8O
+                      MOVE WS-LOANID TO LOAN8O
+                      MOVE WS-NAME   TO NAME8O
+                      MOVE WS-STATUS TO STATS8O
+                      MOVE WS-ACTAMT TO ACTU8O
+                      MOVE ZEROES    TO PAID8O
+                 WHEN 9
+                      MOVE WS-CUSTID TO CUST9O
+                      MOVE WS-LOANID TO LOAN9O
+                      MOVE WS-NAME   TO NAME9O
+                      MOVE WS-STATUS TO STATS9O
+                      MOVE WS-ACTAMT TO ACTU9O
+                      MOVE ZEROES    TO PAID9O
+                 WHEN 10
+                      MOVE WS-CUSTID TO CUST10O
+                      MOVE WS-LOANID TO LOAN10O
+                      MOVE WS-NAME   TO NAME10O
+                      MOVE WS-STATUS TO STATS10O
+                      MOVE WS-ACTAMT TO ACTU10O
+                      MOVE ZEROES    TO PAID10O
+              END-EVALUATE
+
+              ADD 1 TO WS-TEMP-INDEX
+
+           END-PERFORM
+           EXEC CICS SEND MAP('AGCT') MAPSET('AGCT') ERASE
+           END-EXEC
+           IF EIBCALEN = 0
+           EXEC CICS RETURN
+                     TRANSID('TACT')
+                     COMMAREA(WS-COMMAREA)
+                     LENGTH(LENGTH OF WS-COMMAREA)
+           END-EXEC
+           ELSE
+           EXEC CICS RETURN
+                     TRANSID('TACT')
+                     COMMAREA(DFHCOMMAREA)
+                     LENGTH(LENGTH OF DFHCOMMAREA)
+           END-EXEC.
+      *----------------------------------------------------------------*
+      * NEXT PAGE
+      *----------------------------------------------------------------*
+       NEXT-PAGE.
+
+           IF CA-INDEX + 10 > CA-TOTAL
+              MOVE 'REACHED BOTTOM' TO MSGO
+              CONTINUE
+           ELSE
+              ADD 10 TO CA-INDEX
+           END-IF.
+      *    PERFORM DISPLAY-PARA.
+      *----------------------------------------------------------------*
+      * PREVIOUS PAGE
+      *----------------------------------------------------------------*
+
+       PREV-PAGE.
+
+           IF CA-INDEX - 10 < 1
+              MOVE 'REACHED TOP' TO MSGO
+              CONTINUE
+           ELSE
+              SUBTRACT 10 FROM CA-INDEX
+           END-IF.
+      *    PERFORM DISPLAY-PARA.
+      *----------------------------------------------------------------*
+      * SAVE ENTER DATA
+      *----------------------------------------------------------------*
+       SAVE-DATA.
+            EXEC CICS ASKTIME
+            ABSTIME(WS-ABSTIME)
+            END-EXEC
+            EXEC CICS FORMATTIME
+            ABSTIME(WS-ABSTIME)
+            DDMMYYYY(WS-DATE)
+            DATESEP('/')
+            END-EXEC
+            PERFORM LOAD-TSQ
+            MOVE WS-DATE TO DATEO
+           MOVE 'N' TO EOD
+           MOVE CA-INDEX TO WS-TEMP-INDEX
+           MOVE CA-TOTAL-COLLECTED TO WS-TOTAL-COLLECTED
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+                                            OR EOD = 'Y'
+              EXEC CICS READQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   ITEM(WS-TEMP-INDEX)
+                   INTO(WS-REC)
+                   RESP(WS-RESP)
+              END-EXEC
+
+              IF WS-RESP NOT = DFHRESP(NORMAL)
+                 MOVE 'Y' TO EOD
+                 CONTINUE
+              ELSE
+
+              EVALUATE WS-I
+                 WHEN 1
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                    MOVE WS-CUSTID TO O-CUSTID
+                    MOVE WS-LOANID TO O-LOANID
+                    MOVE WS-NAME   TO O-NAME
+                    MOVE WS-STATUS TO O-STATUS
+                    MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID1O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID1O TO O-PAID
+                      IF PAID1O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID1O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 2
+                    MOVE WS-CUSTID TO O-CUSTID
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                    MOVE WS-LOANID TO O-LOANID
+                    MOVE WS-NAME   TO O-NAME
+                    MOVE WS-STATUS TO O-STATUS
+                    MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID2O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID2O TO O-PAID
+                      IF PAID2O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID2O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 3
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                    MOVE WS-CUSTID TO O-CUSTID
+                    MOVE WS-LOANID TO O-LOANID
+                    MOVE WS-NAME   TO O-NAME
+                    MOVE WS-STATUS TO O-STATUS
+                    MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID3O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID3O TO O-PAID
+                      IF PAID3O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID3O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 4
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                    MOVE WS-CUSTID TO O-CUSTID
+                    MOVE WS-LOANID TO O-LOANID
+                    MOVE WS-NAME   TO O-NAME
+                    MOVE WS-STATUS TO O-STATUS
+                    MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID5O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID5O TO O-PAID
+                      IF PAID5O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID5O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 5
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID5O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID5O TO O-PAID
+                      IF PAID5O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID5O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 6
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID6O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID6O TO O-PAID
+                      IF PAID1O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID6O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 7
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID7O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID7O TO O-PAID
+                      IF PAID7O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID7O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 8
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID8O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID8O TO O-PAID
+                      IF PAID8O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID8O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 9
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID9O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID9O TO O-PAID
+                      IF PAID9O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID9O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+                 WHEN 10
+                    MOVE WS-LOANID TO O-TRANSID(1:6)
+                    MOVE DD TO O-TRANSID(7:2)
+                    MOVE MM TO O-TRANSID(9:2)
+                    MOVE 1 TO O-TRANSID(11:1)
+                      MOVE WS-CUSTID TO O-CUSTID
+                      MOVE WS-LOANID TO O-LOANID
+                      MOVE WS-NAME   TO O-NAME
+                      MOVE WS-STATUS TO O-STATUS
+                      MOVE WS-ACTAMT TO O-ACTAMT
+                    IF PAID10O > 0
+                    MOVE 'Y' TO O-YORN
+                    MOVE PAID10O TO O-PAID
+                      IF PAID10O < WS-ACTAMT
+                         MOVE 'P' TO O-PTYPE
+                      ELSE
+                         IF PAID10O = WS-ACTAMT
+                         MOVE 'A' TO O-PTYPE
+                         ELSE
+                         MOVE 'E' TO O-PTYPE
+                         END-IF
+                      END-IF
+                    ELSE
+                    MOVE 'N' TO O-YORN
+                    MOVE 'N' TO O-PTYPE
+                    MOVE ZEROES TO O-PAID
+                    END-IF
+                    PERFORM WRITE-OUT
+              END-EVALUATE
+           COMPUTE WS-TOTAL-COLLECTED = WS-TOTAL-COLLECTED + O-PAID
+             ADD 1 TO WS-TEMP-INDEX
+           END-IF
+           END-PERFORM
+           MOVE CA-TOTAL-TARGET TO TARGETO
+           MOVE WS-TOTAL-COLLECTED TO ACTUALO  CA-TOTAL-COLLECTED
+      *    PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+      *
+      *       EVALUATE WS-I
+      *          WHEN 1
+      *             IF PAID1I > 0
+      *                MOVE CUST1O TO O-CUSTID
+      *                MOVE LOAN1O TO O-LOANID
+      *                MOVE NAME1I TO O-NAME
+      *                MOVE STATS1I TO O-STATUS
+      *                MOVE ACTU1I TO O-ACTAMT
+      *                MOVE PAID1I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *          WHEN 2
+      *             IF PAID2I > 0
+      *                MOVE CUST2I TO O-CUSTID
+      *                MOVE LOAN2I TO O-LOANID
+      *                MOVE NAME2I TO O-NAME
+      *                MOVE STATS2I TO O-STATUS
+      *                MOVE ACTU2I TO O-ACTAMT
+      *                MOVE PAID2I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *          WHEN 3
+      *             IF PAID3I > 0
+      *                MOVE CUST3I TO O-CUSTID
+      *                MOVE LOAN3I TO O-LOANID
+      *                MOVE NAME3I TO O-NAME
+      *                MOVE STATS3I TO O-STATUS
+      *                MOVE ACTU3I TO O-ACTAMT
+      *                MOVE PAID3I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *          WHEN 4
+      *             IF PAID4I > 0
+      *                MOVE CUST4I TO O-CUSTID
+      *                MOVE LOAN4I TO O-LOANID
+      *                MOVE NAME4I TO O-NAME
+      *                MOVE STATS4I TO O-STATUS
+      *                MOVE ACTU4I TO O-ACTAMT
+      *                MOVE PAID4I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *          WHEN 5
+      *              IF PAID5I > 0
+      *                 MOVE CUST5I TO O-CUSTID
+      *                 MOVE LOAN5I TO O-LOANID
+      *                 MOVE NAME5I TO O-NAME
+      *                 MOVE STATS5I TO O-STATUS
+      *                 MOVE ACTU5I TO O-ACTAMT
+      *                 MOVE PAID5I TO O-PAID
+      *                 PERFORM WRITE-OUT
+      *              END-IF
+      *          WHEN 6
+      *              IF PAID1I > 0
+      *                 MOVE CUST6I TO O-CUSTID
+      *                 MOVE LOAN6I TO O-LOANID
+      *                 MOVE NAME6I TO O-NAME
+      *                 MOVE STATS6I TO O-STATUS
+      *                 MOVE ACTU6I TO O-ACTAMT
+      *                 MOVE PAID6I TO O-PAID
+      *                 PERFORM WRITE-OUT
+      *              END-IF
+      *          WHEN 7
+      *             IF PAID1I > 0
+      *                MOVE CUST7I TO O-CUSTID
+      *                MOVE LOAN7I TO O-LOANID
+      *                MOVE NAME7I TO O-NAME
+      *                MOVE STATS7I TO O-STATUS
+      *                MOVE ACTU7I TO O-ACTAMT
+      *                MOVE PAID7I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *          WHEN 8
+      *              IF PAID8I > 0
+      *                 MOVE CUST8I TO O-CUSTID
+      *                 MOVE LOAN8I TO O-LOANID
+      *                 MOVE NAME8I TO O-NAME
+      *                 MOVE STATS8I TO O-STATUS
+      *                 MOVE ACTU8I TO O-ACTAMT
+      *                 MOVE PAID8I TO O-PAID
+      *                 PERFORM WRITE-OUT
+      *              END-IF
+      *          WHEN 9
+      *              IF PAID9I > 0
+      *                 MOVE CUST9I TO O-CUSTID
+      *                 MOVE LOAN9I TO O-LOANID
+      *                 MOVE NAME9I TO O-NAME
+      *                 MOVE STATS9I TO O-STATUS
+      *                 MOVE ACTU9I TO O-ACTAMT
+      *                 MOVE PAID9I TO O-PAID
+      *                 PERFORM WRITE-OUT
+      *              END-IF
+      *          WHEN 10
+      *             IF PAID10I > 0
+      *                MOVE CUST10I TO O-CUSTID
+      *                MOVE LOAN10I TO O-LOANID
+      *                MOVE NAME10I TO O-NAME
+      *                MOVE STATS10I TO O-STATUS
+      *                MOVE ACTU10I TO O-ACTAMT
+      *                MOVE PAID10I TO O-PAID
+      *                PERFORM WRITE-OUT
+      *             END-IF
+      *       END-EVALUATE
+      *
+      *    END-PERFORM
+           MOVE 'DETAILS SAVED' TO MSGO.
+      *----------------------------------------------------------------*
+      * WRITE OUTPUT FILE
+      *----------------------------------------------------------------*
+       WRITE-OUT.
+
+           EXEC CICS WRITE
+                FILE('DAYAGCOL')
+                FROM(WS-OUT-REC)
+                RIDFLD(O-TRANSID)
+           END-EXEC.
+

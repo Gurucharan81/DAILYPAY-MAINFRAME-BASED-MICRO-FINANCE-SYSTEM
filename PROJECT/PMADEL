@@ -1,0 +1,334 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PMADEL.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+       01 EOF PIC X VALUE 'N'.
+       01 EOD PIC X VALUE 'N'.
+       01 WS-TSQ-NAME        PIC X(09) VALUE 'DELIQLIST'.
+       01 WS-RESP            PIC S9(8) COMP.
+       01 WS-I               PIC S9(4) COMP.
+       01 I PIC 9 VALUE 0.
+       01 WS-TEMP-INDEX      PIC S9(4) COMP.
+       01 WS-ABSTIME PIC X(10).
+       01 WS-DATE    PIC X(10).
+       01 DELQ-REC.
+          05 LOAN-ID   PIC X(6).
+          05 CUST-ID   PIC X(5).
+          05 DUE-DAYS  PIC 9(3).
+          05 STATUS1   PIC X(10).
+          05 TOTAL-DUE PIC 9(6).
+          05 REST1     PIC X(50).
+       01 WS-REC.
+          05 LOAN-IDT  PIC X(6).
+          05 CUST-IDT  PIC 9(5).
+          05 DUE-DAYST PIC 9(3).
+          05 STATUST  PIC X(5).
+          05 TOTAL-DUET PIC 9(6).
+       01 PD-REC.
+          05 PD-SCREEN PIC X.
+          05 PD-CUSTID PIC 9(5).
+      *01 WTRANS-REC.
+      *   05 WTRANS-ID        PIC 9(8).
+      *   05 CUST-ID          PIC X(8).
+      *   05 LOAN-ID          PIC X(10).
+      *   05 NAME             PIC X(8).
+      *   05 PAYMENT-MODE     PIC 99.
+      *   05 AMOUNT           PIC 9(6).
+      *   05 DATE1            PIC X(10).
+      *   05 INSTALLMENT-NO   PIC 99.
+      *   05 BANK-NAME        PIC X(10).
+      *   05 BANK-AC-NO       PIC X(10).
+      *   05 AGENT-ID         PIC X(6).
+      *   05 STATUS1          PIC X(20).
+      *   05 TIME1            PIC X(8).
+      *----------------------------------------------------------------*
+             COPY MADEL.
+             COPY DFHAID.
+      *----------------------------------------------------------------*
+      *----------------------------------------------------------------*
+      * COMMAREA
+      *----------------------------------------------------------------*
+       LINKAGE SECTION.
+       01 DFHCOMMAREA.
+          05 CA-SCREEN       PIC X.
+          05 CA-USERID       PIC 9(5).
+          05 CA-LOANID       PIC 9(6).
+          05 CA-INDEX        PIC S9(4) COMP.
+          05 CA-TOTAL        PIC S9(4) COMP.
+          05 CA-TPAID        PIC 9(9).
+          05 CA-TDUE         PIC 9(9).
+
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           IF EIBCALEN = 0
+      *       MOVE 1 TO CA-INDEX
+      *       PERFORM LOAD-TSQ
+      *       PERFORM DISPLAY-PARA
+              ADD 1 TO I
+              MOVE LOW-VALUES TO MADELO
+              EXEC CICS SEND MAP('MADEL') MAPSET('MADEL') ERASE
+              END-EXEC
+              EXEC CICS RETURN
+                        TRANSID('TMDL')
+                        COMMAREA(EOF)
+                        LENGTH(1)
+              END-EXEC
+           ELSE
+           IF CA-SCREEN = 'X'
+              MOVE LOW-VALUES TO MADELO
+              MOVE 'Y' TO CA-SCREEN
+              MOVE 1 TO CA-INDEX
+    **        PERFORM LOAD-TSQ
+              MOVE LOW-VALUES TO MADELO
+              MOVE ZEROES TO CUSTIDO
+              PERFORM DATE-PARA
+              MOVE WS-DATE TO DATE1O
+     *        PERFORM DISPLAY-PARA
+      *       EXEC CICS SEND MAP('MADEL') MAPSET('MADEL')
+      *       END-EXEC
+      *       EXEC CICS RETURN
+      *                 TRANSID('TMDL')
+      *                 COMMAREA(DFHCOMMAREA)
+      *                 LENGTH(LENGTH OF DFHCOMMAREA)
+      *       END-EXEC
+           ELSE
+           EVALUATE EIBAID
+
+              WHEN DFHENTER
+                   PERFORM RECIEVE-PARA
+              WHEN DFHPF8
+                   PERFORM NEXT-PAGE
+
+              WHEN DFHPF7
+                   PERFORM PREV-PAGE
+              WHEN DFHPF3
+                   EXEC CICS XCTL PROGRAM('PMADB')
+                                  COMMAREA(CA-SCREEN)
+                                  LENGTH(1)
+                   END-EXEC
+           END-EVALUATE
+
+           PERFORM DISPLAY-PARA
+           EXEC CICS RETURN
+                TRANSID('TMDL')
+                COMMAREA(DFHCOMMAREA)
+           END-EXEC
+           END-IF.
+       DATE-PARA.
+           EXEC CICS ASKTIME
+           ABSTIME(WS-ABSTIME)
+           END-EXEC
+           EXEC CICS FORMATTIME
+           ABSTIME(WS-ABSTIME)
+           DDMMYYYY(WS-DATE)
+           DATESEP('/')
+           END-EXEC.
+
+       RECIEVE-PARA.
+           EXEC CICS RECEIVE MAP('MADEL')
+                             MAPSET('MADEL')
+           END-EXEC
+           EXEC CICS SEND TEXT FROM(CUSTIDI) LENGTH(5) END-EXEC
+           IF CUSTIDI = ZEROES
+               PERFORM LOAD-TSQ
+               PERFORM GET-TOTALS
+           ELSE
+               MOVE CUSTIDI TO PD-CUSTID
+               MOVE 'M' TO PD-SCREEN
+               EXEC CICS XCTL PROGRAM('PCMOV')
+                              COMMAREA(PD-REC)
+                              LENGTH(LENGTH OF PD-REC)
+               END-EXEC
+           END-IF.
+      *----------------------------------------------------------------*
+      * LOAD FILE INTO TSQ (ONLY FIRST TIME)
+      *----------------------------------------------------------------*
+       LOAD-TSQ.
+
+           MOVE 0 TO CA-TOTAL
+
+           EXEC CICS DELETEQ TS
+                QUEUE(WS-TSQ-NAME)
+                RESP(WS-RESP)
+           END-EXEC
+
+           MOVE LOW-VALUES TO CUST-ID
+      * WTRANSFL IS A COLLECTION OF WHOLE DAYS PAYMENTS BOTH AG AND ONLI
+      * TRANSID = LOANID + DDMM
+              EXEC CICS STARTBR
+                              FILE('DELQFL')
+                              RIDFLD(LOAN-ID)
+                              KEYLENGTH(6)
+                              RESP(WS-RESP)
+              END-EXEC
+               EXEC CICS READNEXT
+                            FILE('DELQFL')
+                            RIDFLD(LOAN-ID)
+                            INTO(DELQ-REC)
+                            RESP(WS-RESP)
+               END-EXEC
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL EOF = 'Y'
+
+              MOVE CUST-ID TO CUST-IDT
+              MOVE LOAN-ID TO  LOAN-IDT
+              MOVE DUE-DAYS    TO DUE-DAYST
+              MOVE STATUS1 TO STATUST
+              MOVE TOTAL-DUE TO TOTAL-DUET
+              EXEC CICS WRITEQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   FROM(WS-REC)
+                   MAIN
+                   ITEM(WS-I)
+              END-EXEC
+
+               EXEC CICS READNEXT
+                            FILE('DELQFL')
+                            RIDFLD(LOAN-ID)
+                            INTO(DELQ-REC)
+                            RESP(WS-RESP)
+               END-EXEC
+               IF WS-RESP = DFHRESP(ENDFILE)
+                   MOVE 'Y' TO EOF
+                      EXEC CICS ENDBR
+                                FILE('DELQFL')
+                                RESP(WS-RESP)
+                      END-EXEC
+               END-IF
+              ADD 1 TO CA-TOTAL
+
+           END-PERFORM.
+
+      *----------------------------------------------------------------*
+      * DISPLAY PAGE (10 RECORDS)
+      *----------------------------------------------------------------*
+       DISPLAY-PARA.
+             MOVE CA-INDEX TO WS-TEMP-INDEX
+             PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+                                 OR EOD = 'Y'
+              EXEC CICS READQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   ITEM(WS-TEMP-INDEX)
+                   INTO(WS-REC)
+                   RESP(WS-RESP)
+              END-EXEC
+
+              IF WS-RESP NOT = DFHRESP(NORMAL)
+                 MOVE 'Y' TO EOD
+              END-IF
+
+              EVALUATE WS-I
+                 WHEN 1
+                    MOVE CUST-IDT TO CID1O
+                    MOVE LOAN-IDT  TO LID1O
+                    MOVE DUE-DAYST  TO DD1O
+                    MOVE STATUST  TO  ST1O
+                    MOVE TOTAL-DUET TO AMT1O
+                 WHEN 2
+                    MOVE CUST-IDT TO CID2O
+                    MOVE LOAN-IDT  TO LID2O
+                    MOVE DUE-DAYST  TO DD2O
+                    MOVE STATUST  TO  ST2O
+                    MOVE TOTAL-DUET TO AMT2O
+                 WHEN 3
+                    MOVE CUST-IDT TO CID3O
+                    MOVE LOAN-IDT  TO LID3O
+                    MOVE DUE-DAYST  TO DD3O
+                    MOVE STATUST  TO  ST3O
+                    MOVE TOTAL-DUET TO AMT3O
+                 WHEN 4
+                    MOVE CUST-IDT TO CID4O
+                    MOVE LOAN-IDT  TO LID4O
+                    MOVE DUE-DAYST  TO DD4O
+                    MOVE STATUST  TO  ST4O
+                    MOVE TOTAL-DUET TO AMT4O
+                 WHEN 5
+                    MOVE CUST-IDT TO CID5O
+                    MOVE LOAN-IDT  TO LID5O
+                    MOVE DUE-DAYST  TO DD5O
+                    MOVE STATUST  TO  ST5O
+                    MOVE TOTAL-DUET TO AMT5O
+                 WHEN 6
+                    MOVE CUST-IDT TO CID6O
+                    MOVE LOAN-IDT  TO LID6O
+                    MOVE DUE-DAYST  TO DD6O
+                    MOVE STATUST  TO  ST6O
+                    MOVE TOTAL-DUET TO AMT6O
+                 WHEN 7
+                    MOVE CUST-IDT TO CID7O
+                    MOVE LOAN-IDT  TO LID7O
+                    MOVE DUE-DAYST  TO DD7O
+                    MOVE STATUST  TO  ST7O
+                    MOVE TOTAL-DUET TO AMT7O
+                 WHEN 8
+                    MOVE CUST-IDT TO CID8O
+                    MOVE LOAN-IDT  TO LID8O
+                    MOVE DUE-DAYST  TO DD8O
+                    MOVE STATUST  TO  ST8O
+                    MOVE TOTAL-DUET TO AMT8O
+                 WHEN 9
+                    MOVE CUST-IDT TO CID9O
+                    MOVE LOAN-IDT  TO LID9O
+                    MOVE DUE-DAYST  TO DD9O
+                    MOVE STATUST  TO  ST9O
+                    MOVE TOTAL-DUET TO AMT9O
+                 WHEN 10
+                    MOVE CUST-IDT TO CID10O
+                    MOVE LOAN-IDT  TO LID10O
+                    MOVE DUE-DAYST  TO DD10O
+                    MOVE STATUST  TO  ST10O
+                    MOVE TOTAL-DUET TO AMT10O
+              END-EVALUATE
+
+              ADD 1 TO WS-TEMP-INDEX
+
+           END-PERFORM
+
+           EXEC CICS SEND MAP('MADEL') MAPSET('MADEL')  ERASE
+           END-EXEC
+           EXEC CICS RETURN
+                     TRANSID('TMDL')
+                     COMMAREA(DFHCOMMAREA)
+                     LENGTH(LENGTH OF DFHCOMMAREA)
+           END-EXEC.
+      *----------------------------------------------------------------*
+      * NEXT PAGE
+      *----------------------------------------------------------------*
+       NEXT-PAGE.
+
+           IF CA-INDEX + 10 > CA-TOTAL
+              MOVE 'REACHED BOTTOM' TO MSGO
+              CONTINUE
+           ELSE
+             MOVE SPACES TO CID1O LID1O DD1O ST1O AMT1O
+             CID2O LID2O DD2O ST2O AMT2O   CID3O LID3O DD3O ST3O AMT3O
+             CID4O LID4O DD4O ST4O AMT4O   CID5O LID5O DD5O ST5O AMT5O
+             CID6O LID6O DD6O ST6O AMT6O   CID7O LID7O DD7O ST7O AMT7O
+             CID8O LID8O DD8O ST8O AMT8O   CID9O LID9O DD9O ST9O AMT9O
+             CID10O LID10O DD10O ST10O AMT10O  MSGO
+              ADD 10 TO CA-INDEX
+           END-IF.
+      *    PERFORM DISPLAY-PARA.
+      *----------------------------------------------------------------*
+      * PREVIOUS PAGE
+      *----------------------------------------------------------------*
+
+       PREV-PAGE.
+
+           IF CA-INDEX - 10 < 1
+              MOVE 'REACHED TOP' TO MSGO
+              CONTINUE
+           ELSE
+             MOVE SPACES TO CID1O LID1O DD1O ST1O AMT1O
+             CID2O LID2O DD2O ST2O AMT2O   CID3O LID3O DD3O ST3O AMT3O
+             CID4O LID4O DD4O ST4O AMT4O   CID5O LID5O DD5O ST5O AMT5O
+             CID6O LID6O DD6O ST6O AMT6O   CID7O LID7O DD7O ST7O AMT7O
+             CID8O LID8O DD8O ST8O AMT8O   CID9O LID9O DD9O ST9O AMT9O
+             CID10O LID10O DD10O ST10O AMT10O  MSGO
+              SUBTRACT 10 FROM CA-INDEX
+           END-IF.
+       GET-TOTALS.
+      *    READ LOAN FILE AND GET TOTALS
+      *    MOVE THESE TOTALS TO MAP AND DFHCOMMAREA
+

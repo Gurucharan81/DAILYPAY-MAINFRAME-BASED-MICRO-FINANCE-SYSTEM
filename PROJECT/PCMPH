@@ -1,0 +1,363 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PCMPH.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+       01 EOF  PIC X VALUE 'N'.
+       01 EOD  PIC X VALUE 'N'.
+       01 WS-TSQ-NAME        PIC X(11) VALUE 'CPAYHISTORY'.
+       01 WS-RESP            PIC S9(8) COMP.
+       01 WS-I               PIC S9(4) COMP.
+       01 WS-TEMP-INDEX      PIC S9(4) COMP.
+       01 WS-REC.
+          05 WS-DATE         PIC X(10).
+          05 WS-INSTALLMENT  PIC 99.
+          05 WS-AMOUNT       PIC 9(6).
+          05 WS-MODE         PIC X.
+       01 INSTALLMENT-NO   PIC 99 VALUE 0.
+       01 WTRANS-REC.
+      *   05 WTRANS-ID        PIC 9(11).
+      *   05 CUST-ID          PIC X(5).
+      *   05 LOAN-ID          PIC X(06).
+      *   05 NAME             PIC X(10).
+      *   05 PAYMENT-MODE     PIC X(5).
+      *   05 AMOUNT           PIC 9(6).
+      *   05 DATE1            PIC X(10).
+      *   05 BANK-NAME        PIC X(10).
+      *   05 BANK-AC-NO       PIC X(10).
+      *   05 AGENT-ID         PIC X(6).
+      *   05 STATUS1          PIC X(10).
+      *   05 TIME1            PIC X(8).
+      *   05 REST1            PIC X(07).
+          05 WTRANS-ID       PIC X(11).
+          05 LOANID        PIC X(6).
+          05 CUSTID        PIC X(5).
+          05 NAME          PIC X(10).
+          05 STATUS1       PIC X(8).
+          05 ACTAMT        PIC 9(6).
+          05 PAID          PIC 9(6).
+          05 PAYMENT-TYPE    PIC X.
+          05 BEAT            PIC X(27).
+       01 MU-REC.
+          05 MU-SCREEN PIC X.
+          05 MU-CUSTID PIC 9(5).
+       01 LOAN-REC.
+          05 LOAN-ID1    PIC 9(6).
+          05 CUST-ID1    PIC 9(5).
+          05 FILLER      PIC X(52) VALUE SPACES.
+          05 TOTAL-PAID  PIC 9(6).
+          05 FILLER      PIC X(15) VALUE SPACES.
+          05 AMT-TOBE-PAID PIC 9(6).
+          05 FILLER      PIC X(20) VALUE SPACES.
+      *----------------------------------------------------------------*
+             COPY CMPH.
+             COPY DFHAID.
+      *----------------------------------------------------------------*
+      *----------------------------------------------------------------*
+      * COMMAREA
+      *----------------------------------------------------------------*
+       LINKAGE SECTION.
+       01 DFHCOMMAREA.
+          05 CA-SCREEN       PIC X VALUE 'X'.
+          05 CA-CUSTID       PIC 9(5).
+          05 CA-LOANID       PIC 9(6).
+          05 CA-INDEX        PIC  9(4).
+          05 CA-TOTAL        PIC  9(4).
+          05 CA-TPAID        PIC 9(9).
+          05 CA-TDUE         PIC 9(9).
+
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           IF EIBCALEN = 0
+      * DELETE ALL TIS SCRAP WHILE INTEGRATION
+      *       MOVE 1 TO CA-INDEX
+      *       PERFORM LOAD-TSQ
+      *       PERFORM DISPLAY-PARA
+              ADD  1 TO  WS-I
+      *       EXEC CICS SEND TEXT
+      *                      FROM(WS-I)
+      *                      LENGTH(2)
+      *       END-EXEC
+              EXEC CICS SEND MAP('CMPH') MAPSET('CMPH')
+              END-EXEC
+              EXEC CICS RETURN
+                        TRANSID('TCPH')
+                        COMMAREA(WS-I)
+                        LENGTH(02)
+              END-EXEC
+           ELSE
+
+           IF CA-SCREEN = 'X'
+      *    EXEC CICS SEND TEXT
+      *                   FROM(CA-SCREEN)
+      *                   LENGTH(1)
+      *    END-EXEC
+              MOVE 'Y' TO CA-SCREEN
+              MOVE 1 TO CA-INDEX
+              MOVE LOW-VALUES TO CMPHO
+              MOVE CA-CUSTID TO CUSTIDO
+              EXEC CICS SEND MAP('CMPH') MAPSET('CMPH')   ERASE
+              END-EXEC
+              EXEC CICS RETURN
+                        TRANSID('TCPH')
+                        COMMAREA(DFHCOMMAREA)
+                        LENGTH(LENGTH OF DFHCOMMAREA)
+              END-EXEC
+           ELSE
+           EVALUATE EIBAID
+
+              WHEN DFHENTER
+                   PERFORM RECIEVE-PARA
+
+              WHEN DFHPF8
+                   PERFORM NEXT-PAGE
+
+              WHEN DFHPF7
+                   PERFORM PREV-PAGE
+              WHEN DFHPF3
+                   MOVE 'X' TO MU-SCREEN
+                   MOVE CA-CUSTID TO MU-CUSTID
+                   EXEC CICS XCTL PROGRAM('PCMMU')
+                                  COMMAREA(MU-REC)
+                                  LENGTH(6)
+                   END-EXEC
+           END-EVALUATE
+
+           PERFORM DISPLAY-PARA
+           MOVE LOANIDI TO CA-LOANID
+           MOVE CUSTIDI TO CA-CUSTID
+           EXEC CICS RETURN
+                TRANSID('PCPH')
+                COMMAREA(DFHCOMMAREA)
+           END-EXEC
+           END-IF.
+       RECIEVE-PARA.
+           EXEC CICS RECEIVE MAP('CMPH')
+                             MAPSET('CMPH')
+           END-EXEC
+           PERFORM LOANID-VALIDATION
+           PERFORM LOAD-TSQ
+           PERFORM GET-TOTALS.
+       LOANID-VALIDATION.
+           MOVE LOANIDI TO LOAN-ID1
+           EXEC CICS READ FILE('LOANFIL1')
+                          RIDFLD(LOAN-ID1)
+                          INTO(LOAN-REC)
+                          RESP(WS-RESP)
+           END-EXEC
+           IF WS-RESP = DFHRESP(NORMAL)
+              IF CUST-ID1 = CA-CUSTID
+                 CONTINUE
+              ELSE
+              MOVE 'LOANID IS NOT YOURS' TO MSGO
+              EXEC CICS SEND MAP('CMPH') MAPSET('CMPH')   ERASE
+              END-EXEC
+              EXEC CICS RETURN
+                        TRANSID('TCPH')
+                        COMMAREA(DFHCOMMAREA)
+                        LENGTH(LENGTH OF DFHCOMMAREA)
+              END-EXEC
+           ELSE
+              MOVE 'LOANID NOT FOUND' TO MSGO
+              EXEC CICS SEND MAP('CMPH') MAPSET('CMPH')   ERASE
+              END-EXEC
+              EXEC CICS RETURN
+                        TRANSID('TCPH')
+                        COMMAREA(DFHCOMMAREA)
+                        LENGTH(LENGTH OF DFHCOMMAREA)
+              END-EXEC.
+      *----------------------------------------------------------------*
+      * LOAD FILE INTO TSQ (ONLY FIRST TIME)
+      *----------------------------------------------------------------*
+       LOAD-TSQ.
+
+           MOVE 0 TO CA-TOTAL
+
+           EXEC CICS DELETEQ TS
+                QUEUE(WS-TSQ-NAME)
+                RESP(WS-RESP)
+           END-EXEC
+
+           MOVE LOANIDI TO WTRANS-ID(1:6)
+      * WTRANSFL IS A COLLECTION OF WHOLE DAYS PAYMENTS BOTH AG AND ONLI
+      * TRANSID = LOANID + DDMM
+              EXEC CICS STARTBR
+                              FILE('WTRANSFI')
+                              RIDFLD(WTRANS-ID)
+                              KEYLENGTH(6)
+                              GENERIC
+                              RESP(WS-RESP)
+              END-EXEC
+              EXEC CICS READNEXT
+                           FILE('WTRANSFI')
+                           RIDFLD(WTRANS-ID)
+                           KEYLENGTH(6)
+                           INTO(WTRANS-REC)
+                           RESP(WS-RESP)
+              END-EXEC
+              MOVE 'N' TO EOF
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL EOF = 'Y'
+             IF LOANIDI = WTRANS-ID(1:6)
+              MOVE PAYMENT-TYPE TO WS-MODE
+              MOVE PAID        TO WS-AMOUNT
+              MOVE WTRANS-ID(7:2)  TO WS-DATE(1:2)
+              MOVE '/' TO WS-DATE(3:1)
+              MOVE WTRANS-ID(9:2) TO WS-DATE(4:2)
+              MOVE '/' TO WS-DATE(6:1)
+              MOVE '2026' TO WS-DATE(7:4)
+              ADD 1 TO INSTALLMENT-NO
+              MOVE INSTALLMENT-NO TO WS-INSTALLMENT
+              EXEC CICS WRITEQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   FROM(WS-REC)
+                   ITEM(WS-I)
+                   MAIN
+              END-EXEC
+
+               EXEC CICS READNEXT
+                            FILE('WTRANSFI')
+                            RIDFLD(WTRANS-ID)
+                            KEYLENGTH(6)
+                            INTO(WTRANS-REC)
+                            RESP(WS-RESP)
+               END-EXEC
+               IF WS-RESP = DFHRESP(ENDFILE)
+                   MOVE 'Y' TO EOF
+                      EXEC CICS ENDBR
+                                FILE('WTRANSFI')
+                                RESP(WS-RESP)
+                      END-EXEC
+               END-IF
+              ADD 1 TO CA-TOTAL
+           ELSE
+              MOVE 'Y' TO EOF
+           END-IF
+           END-PERFORM
+           MOVE 'N' TO EOF.
+      *----------------------------------------------------------------*
+      * DISPLAY PAGE (10 RECORDS)
+      *----------------------------------------------------------------*
+       DISPLAY-PARA.
+
+      *    MOVE CA-LOANID TO LOANIDO
+           MOVE CA-CUSTID TO CUSTIDO
+           MOVE CA-INDEX TO WS-TEMP-INDEX
+
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+                                            OR EOD = 'Y'
+              EXEC CICS READQ TS
+                   QUEUE(WS-TSQ-NAME)
+                   ITEM(WS-TEMP-INDEX)
+                   INTO(WS-REC)
+                   RESP(WS-RESP)
+              END-EXEC
+
+              IF WS-RESP NOT = DFHRESP(NORMAL)
+                 MOVE 'Y' TO EOD
+              END-IF
+
+              EVALUATE WS-I
+                 WHEN 1
+                    MOVE WS-DATE TO DATE1O
+                    MOVE WS-INSTALLMENT  TO INST1O
+                    MOVE WS-AMOUNT   TO AMT1O
+                    MOVE WS-MODE   TO MODE1O
+                 WHEN 2
+                    MOVE WS-DATE TO DATE2O
+                    MOVE WS-INSTALLMENT  TO INST2O
+                    MOVE WS-AMOUNT   TO AMT2O
+                    MOVE WS-MODE   TO MODE2O
+                 WHEN 3
+                    MOVE WS-DATE TO DATE3O
+                    MOVE WS-INSTALLMENT  TO INST3O
+                    MOVE WS-AMOUNT   TO AMT3O
+                    MOVE WS-MODE   TO MODE3O
+                 WHEN 4
+                    MOVE WS-DATE TO DATE4O
+                    MOVE WS-INSTALLMENT  TO INST4O
+                    MOVE WS-AMOUNT   TO AMT4O
+                    MOVE WS-MODE   TO MODE4O
+                 WHEN 5
+                      MOVE WS-DATE TO DATE5O
+                      MOVE WS-INSTALLMENT  TO INST5O
+                      MOVE WS-AMOUNT   TO AMT5O
+                      MOVE WS-MODE   TO MODE5O
+                 WHEN 6
+                      MOVE WS-DATE TO DATE6O
+                      MOVE WS-INSTALLMENT  TO INST6O
+                      MOVE WS-AMOUNT   TO AMT6O
+                      MOVE WS-MODE   TO MODE6O
+                 WHEN 7
+                      MOVE WS-DATE TO DATE7O
+                      MOVE WS-INSTALLMENT  TO INST7O
+                      MOVE WS-AMOUNT   TO AMT7O
+                      MOVE WS-MODE   TO MODE7O
+                 WHEN 8
+                      MOVE WS-DATE TO DATE8O
+                      MOVE WS-INSTALLMENT  TO INST8O
+                      MOVE WS-AMOUNT   TO AMT8O
+                      MOVE WS-MODE   TO MODE8O
+                 WHEN 9
+                      MOVE WS-DATE TO DATE9O
+                      MOVE WS-INSTALLMENT  TO INST9O
+                      MOVE WS-AMOUNT   TO AMT9O
+                      MOVE WS-MODE   TO MODE9O
+                 WHEN 10
+                      MOVE WS-DATE TO DATE10O
+                      MOVE WS-INSTALLMENT  TO INST10O
+                      MOVE WS-AMOUNT   TO AMT10O
+                      MOVE WS-MODE   TO MODE10O
+              END-EVALUATE
+
+              ADD 1 TO WS-TEMP-INDEX
+
+           END-PERFORM
+
+           EXEC CICS SEND MAP('CMPH') MAPSET('CMPH')
+           END-EXEC
+           EXEC CICS RETURN
+                     TRANSID('TCPH')
+                     COMMAREA(DFHCOMMAREA)
+                     LENGTH(LENGTH OF DFHCOMMAREA)
+           END-EXEC.
+      *----------------------------------------------------------------*
+      * NEXT PAGE
+      *----------------------------------------------------------------*
+       NEXT-PAGE.
+
+           IF CA-INDEX + 10 > CA-TOTAL
+              MOVE 'REACHED BOTTOM' TO MSGO
+              CONTINUE
+           ELSE
+              MOVE SPACES TO DATE1O INST1O  AMT1O MODE1O
+              DATE2O INST2O  AMT2O MODE2O  DATE3O INST3O  AMT3O MODE3O
+              DATE4O INST4O  AMT4O MODE4O  DATE5O INST5O  AMT5O MODE5O
+              DATE6O INST6O  AMT6O MODE6O  DATE7O INST7O  AMT7O MODE7O
+              DATE8O INST8O  AMT8O MODE8O  DATE9O INST9O  AMT9O MODE9O
+              DATE10O INST10O  AMT10O MODE10O  MSGO
+              ADD 10 TO CA-INDEX
+           END-IF.
+      *    PERFORM DISPLAY-PARA.
+      *----------------------------------------------------------------*
+      * PREVIOUS PAGE
+      *----------------------------------------------------------------*
+
+       PREV-PAGE.
+
+           IF CA-INDEX - 10 < 1
+              MOVE 'REACHED TOP' TO MSGO
+              CONTINUE
+           ELSE
+              MOVE SPACES TO DATE1O INST1O  AMT1O MODE1O
+              DATE2O INST2O  AMT2O MODE2O  DATE3O INST3O  AMT3O MODE3O
+              DATE4O INST4O  AMT4O MODE4O  DATE5O INST5O  AMT5O MODE5O
+              DATE6O INST6O  AMT6O MODE6O  DATE7O INST7O  AMT7O MODE7O
+              DATE8O INST8O  AMT8O MODE8O  DATE9O INST9O  AMT9O MODE9O
+              DATE10O INST10O  AMT10O MODE10O   MSGO
+              SUBTRACT 10 FROM CA-INDEX
+           END-IF.
+       GET-TOTALS.
+      *    READ LOAN FILE AND GET TOTALS
+      *    MOVE THESE TOTALS TO MAP AND DFHCOMMAREA
+
